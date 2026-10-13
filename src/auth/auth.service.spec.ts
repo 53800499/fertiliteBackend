@@ -1,3 +1,14 @@
+jest.mock('@nestjs/jwt', () => ({
+  JwtService: class MockJwtService {
+    sign = jest.fn().mockReturnValue('mock-token');
+    signAsync = jest.fn().mockResolvedValue('mock-token');
+  },
+}));
+jest.mock('@nestjs/config', () => ({
+  ConfigService: class MockConfigService {
+    get = jest.fn((key: string, defaultVal?: any) => defaultVal || 'mock-jwt-secret');
+  },
+}));
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '../../test/test-utils';
 import { JwtService } from '@nestjs/jwt';

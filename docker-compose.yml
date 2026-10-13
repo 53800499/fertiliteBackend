@@ -1,0 +1,64 @@
+services:
+  # ============================================================================
+  # SERVICE 1 : BASE DE DONNÉES POSTGRESQL LOCAL
+  # ============================================================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: ferti-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DATABASE_USER:-postgres}
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD:-postgres}
+      POSTGRES_DB: ${DATABASE_NAME:-fertidb}
+    ports:
+      - "${DATABASE_PORT:-5432}:5432"
+    volumes:
+      - ferti_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DATABASE_USER:-postgres} -d ${DATABASE_NAME:-fertidb}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ferti-network
+
+  # ============================================================================
+  # SERVICE 2 : BACKEND NESTJS
+  # ============================================================================
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ferti-backend
+    restart: unless-stopped
+    ports:
+      - "${PORT:-3000}:3000"
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: 3000
+      # Si DATABASE_URL n'est pas renseignée (ex: pas sur Neon), on cible le conteneur postgres local
+      DATABASE_HOST: postgres
+      DATABASE_PORT: 5432
+      DATABASE_USER: ${DATABASE_USER:-postgres}
+      DATABASE_PASSWORD: ${DATABASE_PASSWORD:-postgres}
+      DATABASE_NAME: ${DATABASE_NAME:-fertidb}
+      DATABASE_SSL: ${DATABASE_SSL:-false}
+      DATABASE_URL: ${DATABASE_URL:-}
+      JWT_SECRET: ${JWT_SECRET:-super_secret_jwt_key_pour_developpement_local_min_32_chars}
+      JWT_EXPIRATION: ${JWT_EXPIRATION:-7d}
+      REFRESH_TOKEN_SECRET: ${REFRESH_TOKEN_SECRET:-super_secret_refresh_token_key_pour_developpement_local}
+      REFRESH_TOKEN_EXPIRATION: ${REFRESH_TOKEN_EXPIRATION:-30d}
+    depends_on:
+      postgres:
+        condition: service_healthy
+        required: false
+    networks:
+      - ferti-network
+
+networks:
+  ferti-network:
+    driver: bridge
+
+volumes:
+  ferti_pgdata:
+    driver: local

@@ -6,6 +6,7 @@ import { UsersModule } from './users/users.module';
 import { PrivacyModule } from './privacy/privacy.module';
 import { CyclesModule } from './cycles/cycles.module';
 import { ObservationsModule } from './observations/observations.module';
+import { FertilityModule } from './fertility/fertility.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 
@@ -21,6 +22,7 @@ import { AppService } from './app.service';
     PrivacyModule,
     CyclesModule,
     ObservationsModule,
+    FertilityModule,
   ],
   controllers: [AppController],
   providers: [AppService],

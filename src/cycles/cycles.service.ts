@@ -10,6 +10,8 @@ import { JourRegles, IntensiteFluxEnum } from './entities/jour-regles.entity';
 import { StartCycleDto } from './dto/start-cycle.dto';
 import { LogFlowDto } from './dto/log-flow.dto';
 import { UpdateCycleDto } from './dto/update-cycle.dto';
+import { Optional } from '@nestjs/common';
+import { FertilityService } from '../fertility/fertility.service';
 
 @Injectable()
 export class CyclesService {
@@ -18,6 +20,8 @@ export class CyclesService {
     private readonly cycleRepo: Repository<Cycle>,
     @InjectRepository(JourRegles)
     private readonly jourReglesRepo: Repository<JourRegles>,
+    @Optional()
+    private readonly fertilityService?: FertilityService,
   ) {}
 
   /**
@@ -74,6 +78,12 @@ export class CyclesService {
       idClientLocal: dto.idClientLocal,
     });
     await this.jourReglesRepo.save(firstDay);
+
+    if (this.fertilityService) {
+      this.fertilityService
+        .calculateAndSavePrediction(userId, dto.dateDebut)
+        .catch(() => {});
+    }
 
     return this.getCycleById(userId, savedCycle.id);
   }
@@ -186,7 +196,15 @@ export class CyclesService {
       cycle.dureeCycleJours = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
     }
 
-    return this.cycleRepo.save(cycle);
+    const saved = await this.cycleRepo.save(cycle);
+
+    if (this.fertilityService) {
+      this.fertilityService
+        .calculateAndSavePrediction(userId, cycle.dateDebut)
+        .catch(() => {});
+    }
+
+    return saved;
   }
 
   /**
