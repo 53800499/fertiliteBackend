@@ -172,7 +172,7 @@ export class NotificationsService {
       type: TypeNotificationEnum.INFORMATION_GENERALE,
       canal: CanalNotificationEnum.PUSH,
       statut: StatutNotificationEnum.ENVOYEE,
-      titre: '✨ Test des alertes FEMAX',
+      titre: '✨ Test des alertes FertiliteApp',
       message:
         'Vos notifications et rappels physiologiques sont parfaitement configurés et opérationnels sur votre appareil.',
       datePlanifiee: now,

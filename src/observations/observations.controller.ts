@@ -46,6 +46,22 @@ export class ObservationsController {
   }
 
   /**
+   * UC-16 DataViz : Analyse thermique symptothermique et détection biphasique
+   */
+  @Get('temperature/bbt-analysis')
+  async getBbtAnalysis(
+    @CurrentUser() user: UserPayload,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+  ) {
+    return this.observationsService.getBbtAnalysis(
+      user.userId,
+      startDate,
+      endDate,
+    );
+  }
+
+  /**
    * UC-17 : Enregistrement de la glaire cervicale
    */
   @Post('cervical-mucus')

@@ -368,6 +368,179 @@ export class ObservationsService implements OnModuleInit {
   }
 
   /**
+   * UC-16 DataViz : Analyse thermique symptothermique et détection biphasique
+   */
+  async getBbtAnalysis(userId: string, startDate?: string, endDate?: string) {
+    let dateFilter: any;
+    if (startDate && endDate) {
+      dateFilter = Between(startDate, endDate);
+    } else if (startDate) {
+      dateFilter = MoreThanOrEqual(startDate);
+    } else if (endDate) {
+      dateFilter = LessThanOrEqual(endDate);
+    }
+
+    const whereClause: any = { utilisateurId: userId };
+    if (dateFilter) {
+      whereClause.date = dateFilter;
+    }
+
+    const [temperatures, glaires] = await Promise.all([
+      this.tempRepo.find({ where: whereClause, order: { date: 'ASC' } }),
+      this.glaireRepo.find({ where: whereClause, order: { date: 'ASC' } }),
+    ]);
+
+    const mucusByDate = new Map<string, string>();
+    for (const g of glaires) {
+      mucusByDate.set(g.date, g.typeGlaire);
+    }
+
+    // Convertir et valider les points
+    const validPoints = temperatures
+      .map((t) => {
+        const tempVal = Number(t.temperatureCelsius);
+        return {
+          date: t.date,
+          temperatureCelsius: tempVal,
+          heurePrise: t.heurePrise || null,
+          estPerturbee: !!t.estPerturbee,
+          facteurPerturbateur: t.facteurPerturbateur || null,
+          typeGlaire: mucusByDate.get(t.date) || null,
+        };
+      })
+      .filter((p) => p.temperatureCelsius >= 34.0 && p.temperatureCelsius <= 42.0);
+
+    if (validPoints.length < 3) {
+      return {
+        status: 'insufficient_data',
+        message: 'Moins de 3 mesures enregistrées. Poursuivez vos prises quotidiennes le matin au réveil.',
+        coverlineCelsius: null,
+        shiftDetected: false,
+        shiftDate: null,
+        shiftDeltaCelsius: null,
+        nadirDate: null,
+        nadirTemperatureCelsius: null,
+        follicularAvgCelsius: validPoints.length > 0 ? Number((validPoints.reduce((acc, p) => acc + p.temperatureCelsius, 0) / validPoints.length).toFixed(2)) : null,
+        lutealAvgCelsius: null,
+        lutealPhaseDays: 0,
+        points: validPoints.map((p, idx) => ({ ...p, cycleDay: idx + 1, isAboveCoverline: false, phase: 'follicular' })),
+      };
+    }
+
+    // Détection du décalage thermique (règle des 6 basses / 3 hautes selon Roetzer & OMS)
+    let bestShiftIndex = -1;
+    let coverline = 0;
+
+    for (let i = 4; i < validPoints.length - 2; i++) {
+      const priorNonPerturbed = validPoints.slice(Math.max(0, i - 6), i).filter((p) => !p.estPerturbee);
+      if (priorNonPerturbed.length < 3) continue;
+
+      const highestPrior = Math.max(...priorNonPerturbed.map((p) => p.temperatureCelsius));
+      const testCoverline = Number((highestPrior + 0.05).toFixed(2));
+
+      const high1 = validPoints[i];
+      const high2 = validPoints[i + 1];
+      const high3 = validPoints[i + 2];
+
+      const h1Valid = !high1.estPerturbee && high1.temperatureCelsius >= highestPrior;
+      const h2Valid = !high2.estPerturbee && high2.temperatureCelsius >= testCoverline;
+      const h3Valid = !high3.estPerturbee && high3.temperatureCelsius >= highestPrior + 0.15;
+
+      if (h1Valid && h2Valid && h3Valid) {
+        bestShiftIndex = i;
+        coverline = testCoverline;
+        break;
+      }
+    }
+
+    let potentialShift = false;
+    let potentialShiftIndex = -1;
+    if (bestShiftIndex === -1 && validPoints.length >= 4) {
+      for (let i = validPoints.length - 2; i < validPoints.length; i++) {
+        if (i < 3) continue;
+        const prior = validPoints.slice(Math.max(0, i - 5), i).filter((p) => !p.estPerturbee);
+        if (prior.length >= 3) {
+          const maxPrior = Math.max(...prior.map((p) => p.temperatureCelsius));
+          if (validPoints[i].temperatureCelsius >= maxPrior + 0.15) {
+            potentialShift = true;
+            potentialShiftIndex = i;
+            coverline = Number((maxPrior + 0.05).toFixed(2));
+            break;
+          }
+        }
+      }
+    }
+
+    let status = 'follicular_phase';
+    let message = 'Courbe en plateau folliculaire (bas). La progestérone n’a pas encore amorcé de hausse thermique.';
+    let shiftDate: string | null = null;
+    let shiftDeltaCelsius: number | null = null;
+    let nadirDate: string | null = null;
+    let nadirTemp: number | null = null;
+    let lutealAvg: number | null = null;
+    let follicularAvg: number | null = null;
+    let lutealDays = 0;
+
+    if (bestShiftIndex !== -1) {
+      status = 'biphasic_confirmed';
+      shiftDate = validPoints[bestShiftIndex].date;
+
+      const nadirCandidates = validPoints.slice(Math.max(0, bestShiftIndex - 2), bestShiftIndex);
+      if (nadirCandidates.length > 0) {
+        const nadirPoint = nadirCandidates.reduce((min, p) => p.temperatureCelsius < min.temperatureCelsius ? p : min);
+        nadirDate = nadirPoint.date;
+        nadirTemp = nadirPoint.temperatureCelsius;
+      }
+
+      const follicularPoints = validPoints.slice(0, bestShiftIndex);
+      const lutealPoints = validPoints.slice(bestShiftIndex);
+
+      follicularAvg = Number((follicularPoints.reduce((acc, p) => acc + p.temperatureCelsius, 0) / (follicularPoints.length || 1)).toFixed(2));
+      lutealAvg = Number((lutealPoints.reduce((acc, p) => acc + p.temperatureCelsius, 0) / (lutealPoints.length || 1)).toFixed(2));
+      shiftDeltaCelsius = Number((lutealAvg - follicularAvg).toFixed(2));
+      lutealDays = lutealPoints.filter((p) => p.temperatureCelsius >= coverline).length;
+
+      message = `Courbe biphasique confirmée ! Décalage thermique net de +${shiftDeltaCelsius} °C détecté à partir du ${shiftDate}. Ovulation confirmée par progestérone.`;
+    } else if (potentialShift) {
+      status = 'potential_shift';
+      shiftDate = validPoints[potentialShiftIndex].date;
+      message = 'Décalage thermique en cours de confirmation. Une 3ème température haute validera le plateau lutéal.';
+      const folPoints = validPoints.slice(0, potentialShiftIndex);
+      follicularAvg = Number((folPoints.reduce((acc, p) => acc + p.temperatureCelsius, 0) / (folPoints.length || 1)).toFixed(2));
+    } else {
+      follicularAvg = Number((validPoints.reduce((acc, p) => acc + p.temperatureCelsius, 0) / validPoints.length).toFixed(2));
+      if (validPoints.length >= 21) {
+        status = 'monophasic_suspected';
+        message = 'Aucune hausse thermique nette au-delà de 21 jours. Cycle potentiellement anovulatoire ou mesures perturbées.';
+      }
+    }
+
+    const annotatedPoints = validPoints.map((p, idx) => ({
+      ...p,
+      cycleDay: idx + 1,
+      isAboveCoverline: coverline > 0 ? p.temperatureCelsius >= coverline : false,
+      phase: bestShiftIndex !== -1
+        ? (idx >= bestShiftIndex ? 'luteal' : 'follicular')
+        : (potentialShift && idx >= potentialShiftIndex ? 'potential_luteal' : 'follicular'),
+    }));
+
+    return {
+      status,
+      message,
+      coverlineCelsius: coverline > 0 ? coverline : null,
+      shiftDetected: bestShiftIndex !== -1,
+      shiftDate,
+      shiftDeltaCelsius,
+      nadirDate,
+      nadirTemperatureCelsius: nadirTemp,
+      follicularAvgCelsius: follicularAvg,
+      lutealAvgCelsius: lutealAvg,
+      lutealPhaseDays: lutealDays,
+      points: annotatedPoints,
+    };
+  }
+
+  /**
    * Suppressions unitaires
    */
   async deleteTemperature(userId: string, date: string): Promise<void> {
