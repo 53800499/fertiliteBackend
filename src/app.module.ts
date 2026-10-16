@@ -7,6 +7,7 @@ import { PrivacyModule } from './privacy/privacy.module';
 import { CyclesModule } from './cycles/cycles.module';
 import { ObservationsModule } from './observations/observations.module';
 import { FertilityModule } from './fertility/fertility.module';
+import { NotificationsModule } from './notifications/notifications.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 
@@ -23,6 +24,7 @@ import { AppService } from './app.service';
     CyclesModule,
     ObservationsModule,
     FertilityModule,
+    NotificationsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

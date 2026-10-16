@@ -16,6 +16,8 @@ import { ObservationSymptome } from '../../observations/entities/observation-sym
 import { VersionMoteurPrediction } from '../../fertility/entities/version-moteur-prediction.entity';
 import { Prediction } from '../../fertility/entities/prediction.entity';
 import { FacteurExplicatif } from '../../fertility/entities/facteur-explicatif.entity';
+import { Notification } from '../../notifications/entities/notification.entity';
+import { PreferenceNotification } from '../../notifications/entities/preference-notification.entity';
 
 @Module({
   imports: [
@@ -50,6 +52,8 @@ import { FacteurExplicatif } from '../../fertility/entities/facteur-explicatif.e
             VersionMoteurPrediction,
             Prediction,
             FacteurExplicatif,
+            Notification,
+            PreferenceNotification,
           ],
           synchronize: configService.get<string>('NODE_ENV') !== 'production', // Uniquement en dev
           logging: configService.get<string>('NODE_ENV') === 'development',
