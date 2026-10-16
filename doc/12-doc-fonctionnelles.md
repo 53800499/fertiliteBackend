@@ -111,3 +111,4 @@ Chaque facteur explicatif répond à une logique médicale vulgarisée :
 | `temperature_basale` | Hausse thermique validée | « La hausse de votre température basale confirme le passage de l'ovulation. » |
 | `glaire_cervicale` | Glaire `'filant_blanc_oeuf'` | « La présence d'une glaire filante indique un pic de fertilité favorable. » |
 | `test_ovulation` | Test LH `'positif'` ou `'pic'` | « Votre test urinaire d'ovulation indique un pic d'hormone LH. » |
+

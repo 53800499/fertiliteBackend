@@ -27,9 +27,17 @@ export class UpdateProfileDto {
 
   @IsOptional()
   @IsInt()
+  dureeMoyenneCycle?: number;
+
+  @IsOptional()
+  @IsInt()
   @Min(1, { message: 'La durée des règles minimale est de 1 jour' })
   @Max(15, { message: 'La durée des règles maximale est de 15 jours' })
   dureeReglesHabituelleJours?: number;
+
+  @IsOptional()
+  @IsInt()
+  dureeMoyenneRegles?: number;
 
   @IsOptional()
   @IsBoolean()

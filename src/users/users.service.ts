@@ -61,10 +61,16 @@ export class UsersService {
     if (dto.objectifPrincipal !== undefined) profil.objectifPrincipal = dto.objectifPrincipal;
     if (dto.dureeCycleHabituelleJours !== undefined) {
       profil.dureeCycleHabituelleJours = dto.dureeCycleHabituelleJours;
+    } else if (dto.dureeMoyenneCycle !== undefined) {
+      profil.dureeCycleHabituelleJours = dto.dureeMoyenneCycle;
     }
+
     if (dto.dureeReglesHabituelleJours !== undefined) {
       profil.dureeReglesHabituelleJours = dto.dureeReglesHabituelleJours;
+    } else if (dto.dureeMoyenneRegles !== undefined) {
+      profil.dureeReglesHabituelleJours = dto.dureeMoyenneRegles;
     }
+
     if (dto.irregulariteDeclaree !== undefined) {
       profil.irregulariteDeclaree = dto.irregulariteDeclaree;
     }
