@@ -12,12 +12,15 @@ import { GlaireCervicale } from './entities/glaire-cervicale.entity';
 import { TestOvulation } from './entities/test-ovulation.entity';
 import { TypeSymptome } from './entities/type-symptome.entity';
 import { ObservationSymptome } from './entities/observation-symptome.entity';
+import { RapportSexuel } from './entities/rapport-sexuel.entity';
 import { CategorieSymptomeEnum } from './entities/observation-enums';
 import { LogTemperatureDto } from './dto/log-temperature.dto';
 import { LogCervicalMucusDto } from './dto/log-cervical-mucus.dto';
 import { LogLhTestDto } from './dto/log-lh-test.dto';
 import { LogSymptomsDto } from './dto/log-symptoms.dto';
+import { LogIntercourseDto } from './dto/log-intercourse.dto';
 import { SaveDayObservationDto } from './dto/save-day-observation.dto';
+import { EncryptionService } from '../common/services/encryption.service';
 
 @Injectable()
 export class ObservationsService implements OnModuleInit {
@@ -34,6 +37,9 @@ export class ObservationsService implements OnModuleInit {
     private readonly typeSymptomeRepo: Repository<TypeSymptome>,
     @InjectRepository(ObservationSymptome)
     private readonly obsSymptomeRepo: Repository<ObservationSymptome>,
+    @InjectRepository(RapportSexuel)
+    private readonly rapportRepo: Repository<RapportSexuel>,
+    private readonly encryptionService: EncryptionService,
   ) {}
 
   async onModuleInit() {
@@ -271,7 +277,81 @@ export class ObservationsService implements OnModuleInit {
   }
 
   /**
-   * Saisie globale journalière (UC-16 à UC-19 combinés)
+   * UC-24 : Enregistrement ou mise à jour d'un rapport intime avec chiffrement AES-256-GCM
+   */
+  async logIntercourse(userId: string, dto: LogIntercourseDto): Promise<RapportSexuel> {
+    let rapport = await this.rapportRepo.findOne({
+      where: { utilisateurId: userId, date: dto.date },
+    });
+
+    const notesChiffrees = dto.notes !== undefined ? this.encryptionService.encrypt(dto.notes) : undefined;
+
+    if (rapport) {
+      rapport.typeRapport = dto.typeRapport;
+      if (dto.heure !== undefined) rapport.heure = dto.heure;
+      if (dto.contraceptionUrgence !== undefined) rapport.contraceptionUrgence = dto.contraceptionUrgence;
+      if (notesChiffrees !== undefined) rapport.notesChiffrees = notesChiffrees;
+      if (dto.idClientLocal !== undefined) rapport.idClientLocal = dto.idClientLocal;
+    } else {
+      rapport = this.rapportRepo.create({
+        utilisateurId: userId,
+        date: dto.date,
+        typeRapport: dto.typeRapport,
+        heure: dto.heure,
+        contraceptionUrgence: dto.contraceptionUrgence ?? false,
+        notesChiffrees: notesChiffrees || null,
+        idClientLocal: dto.idClientLocal,
+      });
+    }
+
+    const saved = await this.rapportRepo.save(rapport);
+    saved.notes = dto.notes !== undefined ? dto.notes : (saved.notesChiffrees ? this.encryptionService.decrypt(saved.notesChiffrees) : null);
+    return saved;
+  }
+
+  /**
+   * UC-24 : Historique des rapports intimes avec déchiffrement applicatif
+   */
+  async getIntercourseHistory(
+    userId: string,
+    startDate?: string,
+    endDate?: string,
+  ): Promise<RapportSexuel[]> {
+    let dateFilter: any;
+    if (startDate && endDate) {
+      dateFilter = Between(startDate, endDate);
+    } else if (startDate) {
+      dateFilter = MoreThanOrEqual(startDate);
+    } else if (endDate) {
+      dateFilter = LessThanOrEqual(endDate);
+    }
+
+    const whereClause: any = { utilisateurId: userId };
+    if (dateFilter) {
+      whereClause.date = dateFilter;
+    }
+
+    const list = await this.rapportRepo.find({
+      where: whereClause,
+      order: { date: 'DESC' },
+    });
+
+    for (const item of list) {
+      item.notes = item.notesChiffrees ? this.encryptionService.decrypt(item.notesChiffrees) : null;
+    }
+
+    return list;
+  }
+
+  /**
+   * UC-24 : Suppression unitaire d'un rapport intime
+   */
+  async deleteIntercourse(userId: string, date: string): Promise<void> {
+    await this.rapportRepo.delete({ utilisateurId: userId, date });
+  }
+
+  /**
+   * Saisie globale journalière (UC-16 à UC-19 & UC-24 combinés)
    */
   async saveDayObservation(userId: string, dto: SaveDayObservationDto) {
     if (dto.temperature) {
@@ -297,14 +377,19 @@ export class ObservationsService implements OnModuleInit {
       });
     }
 
+    if (dto.rapport) {
+      dto.rapport.date = dto.date;
+      await this.logIntercourse(userId, dto.rapport);
+    }
+
     return this.getDayObservations(userId, dto.date);
   }
 
   /**
-   * UC-12 : Détail clinique complet d'un jour
+   * UC-12 : Détail clinique complet d'un jour (BBT, glaire, LH, symptômes, rapports)
    */
   async getDayObservations(userId: string, date: string) {
-    const [temperature, glaire, testsLh, symptomes] = await Promise.all([
+    const [temperature, glaire, testsLh, symptomes, rapport] = await Promise.all([
       this.tempRepo.findOne({ where: { utilisateurId: userId, date } }),
       this.glaireRepo.findOne({ where: { utilisateurId: userId, date } }),
       this.lhRepo.find({
@@ -315,7 +400,12 @@ export class ObservationsService implements OnModuleInit {
         where: { utilisateurId: userId, date },
         relations: { typeSymptome: true },
       }),
+      this.rapportRepo.findOne({ where: { utilisateurId: userId, date } }),
     ]);
+
+    if (rapport) {
+      rapport.notes = rapport.notesChiffrees ? this.encryptionService.decrypt(rapport.notesChiffrees) : null;
+    }
 
     return {
       date,
@@ -323,6 +413,7 @@ export class ObservationsService implements OnModuleInit {
       glaire,
       testsLh,
       symptomes,
+      rapport,
     };
   }
 
@@ -348,7 +439,7 @@ export class ObservationsService implements OnModuleInit {
       whereClause.date = dateFilter;
     }
 
-    const [temperatures, glaires, testsLh, symptomes] = await Promise.all([
+    const [temperatures, glaires, testsLh, symptomes, rapports] = await Promise.all([
       this.tempRepo.find({ where: whereClause, order: { date: 'DESC' } }),
       this.glaireRepo.find({ where: whereClause, order: { date: 'DESC' } }),
       this.lhRepo.find({ where: whereClause, order: { date: 'DESC' } }),
@@ -357,13 +448,19 @@ export class ObservationsService implements OnModuleInit {
         relations: { typeSymptome: true },
         order: { date: 'DESC' },
       }),
+      this.rapportRepo.find({ where: whereClause, order: { date: 'DESC' } }),
     ]);
+
+    for (const r of rapports) {
+      r.notes = r.notesChiffrees ? this.encryptionService.decrypt(r.notesChiffrees) : null;
+    }
 
     return {
       temperatures,
       glaires,
       testsLh,
       symptomes,
+      rapports,
     };
   }
 
@@ -561,5 +658,65 @@ export class ObservationsService implements OnModuleInit {
     const obs = await this.obsSymptomeRepo.findOne({ where: { id, utilisateurId: userId } });
     if (!obs) throw new NotFoundException('Observation symptôme introuvable');
     await this.obsSymptomeRepo.delete(id);
+  }
+
+  /**
+   * UC-Sync : Traitement par lot d'une file d'attente hors-ligne
+   * et récupération bidirectionnelle des mises à jour serveur
+   */
+  async syncBatch(
+    userId: string,
+    dto: {
+      mutations?: SaveDayObservationDto[];
+      deletions?: { type: 'temperature' | 'cervical-mucus' | 'lh-test' | 'symptoms' | 'intercourse'; date?: string; id?: string }[];
+      since?: string;
+    },
+  ) {
+    const results: any[] = [];
+
+    // 1. Appliquer les mutations (Upsert)
+    if (dto.mutations && dto.mutations.length > 0) {
+      for (const m of dto.mutations) {
+        try {
+          const savedDay = await this.saveDayObservation(userId, m);
+          results.push(savedDay);
+        } catch (err) {
+          this.logger.warn(`Échec synchronisation jour ${m.date}: ${err?.message || err}`);
+        }
+      }
+    }
+
+    // 2. Appliquer les suppressions
+    if (dto.deletions && dto.deletions.length > 0) {
+      for (const del of dto.deletions) {
+        try {
+          if (del.type === 'temperature' && del.date) {
+            await this.deleteTemperature(userId, del.date);
+          } else if (del.type === 'cervical-mucus' && del.date) {
+            await this.deleteCervicalMucus(userId, del.date);
+          } else if (del.type === 'lh-test' && del.id) {
+            await this.deleteLhTest(userId, del.id);
+          } else if (del.type === 'symptoms' && del.id) {
+            await this.deleteSymptom(userId, del.id);
+          } else if (del.type === 'intercourse' && del.date) {
+            await this.deleteIntercourse(userId, del.date);
+          }
+        } catch (err) {
+          this.logger.warn(`Échec suppression sync: ${err?.message || err}`);
+        }
+      }
+    }
+
+    // 3. Récupérer les modifications serveur depuis 'since' pour la bidirectionnalité
+    const serverChanges = dto.since
+      ? await this.getObservationsHistory(userId, dto.since.substring(0, 10))
+      : null;
+
+    return {
+      syncedAt: new Date().toISOString(),
+      syncedDaysCount: results.length,
+      syncedDays: results,
+      serverChanges,
+    };
   }
 }

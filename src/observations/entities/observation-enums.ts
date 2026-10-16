@@ -20,3 +20,8 @@ export enum CategorieSymptomeEnum {
   CUTANE = 'cutane',
   AUTRE = 'autre',
 }
+
+export enum TypeRapportEnum {
+  PROTEGE = 'protege',
+  NON_PROTEGE = 'non_protege',
+}

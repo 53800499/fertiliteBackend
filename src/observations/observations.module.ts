@@ -5,6 +5,8 @@ import { GlaireCervicale } from './entities/glaire-cervicale.entity';
 import { TestOvulation } from './entities/test-ovulation.entity';
 import { TypeSymptome } from './entities/type-symptome.entity';
 import { ObservationSymptome } from './entities/observation-symptome.entity';
+import { RapportSexuel } from './entities/rapport-sexuel.entity';
+import { EncryptionService } from '../common/services/encryption.service';
 import { ObservationsService } from './observations.service';
 import { ObservationsController } from './observations.controller';
 
@@ -16,10 +18,11 @@ import { ObservationsController } from './observations.controller';
       TestOvulation,
       TypeSymptome,
       ObservationSymptome,
+      RapportSexuel,
     ]),
   ],
   controllers: [ObservationsController],
-  providers: [ObservationsService],
-  exports: [ObservationsService],
+  providers: [ObservationsService, EncryptionService],
+  exports: [ObservationsService, EncryptionService],
 })
 export class ObservationsModule {}

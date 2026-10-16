@@ -13,6 +13,7 @@ import { GlaireCervicale } from '../../observations/entities/glaire-cervicale.en
 import { TestOvulation } from '../../observations/entities/test-ovulation.entity';
 import { TypeSymptome } from '../../observations/entities/type-symptome.entity';
 import { ObservationSymptome } from '../../observations/entities/observation-symptome.entity';
+import { RapportSexuel } from '../../observations/entities/rapport-sexuel.entity';
 import { VersionMoteurPrediction } from '../../fertility/entities/version-moteur-prediction.entity';
 import { Prediction } from '../../fertility/entities/prediction.entity';
 import { FacteurExplicatif } from '../../fertility/entities/facteur-explicatif.entity';
@@ -49,6 +50,7 @@ import { PreferenceNotification } from '../../notifications/entities/preference-
             TestOvulation,
             TypeSymptome,
             ObservationSymptome,
+            RapportSexuel,
             VersionMoteurPrediction,
             Prediction,
             FacteurExplicatif,

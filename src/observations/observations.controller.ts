@@ -15,6 +15,7 @@ import { LogTemperatureDto } from './dto/log-temperature.dto';
 import { LogCervicalMucusDto } from './dto/log-cervical-mucus.dto';
 import { LogLhTestDto } from './dto/log-lh-test.dto';
 import { LogSymptomsDto } from './dto/log-symptoms.dto';
+import { LogIntercourseDto } from './dto/log-intercourse.dto';
 import { SaveDayObservationDto } from './dto/save-day-observation.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -179,5 +180,58 @@ export class ObservationsController {
     @Param('id') id: string,
   ) {
     await this.observationsService.deleteSymptom(user.userId, id);
+  }
+
+  /**
+   * UC-24 : Enregistrement ou mise à jour d'un rapport intime (chiffrement AES-256)
+   */
+  @Post('intercourse')
+  @HttpCode(HttpStatus.OK)
+  async logIntercourse(
+    @CurrentUser() user: UserPayload,
+    @Body() dto: LogIntercourseDto,
+  ) {
+    return this.observationsService.logIntercourse(user.userId, dto);
+  }
+
+  /**
+   * UC-24 : Historique des rapports intimes (avec déchiffrement applicatif)
+   */
+  @Get('intercourse')
+  async getIntercourseHistory(
+    @CurrentUser() user: UserPayload,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+  ) {
+    return this.observationsService.getIntercourseHistory(
+      user.userId,
+      startDate,
+      endDate,
+    );
+  }
+
+  /**
+   * UC-24 : Suppression unitaire d'un rapport intime
+   */
+  @Delete('intercourse/:date')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async deleteIntercourse(
+    @CurrentUser() user: UserPayload,
+    @Param('date') date: string,
+  ) {
+    await this.observationsService.deleteIntercourse(user.userId, date);
+  }
+
+  /**
+   * UC-Sync : Synchronisation bidirectionnelle par lot (Batch Sync)
+   * Résout la file d'attente hors-ligne et retourne l'état serveur actualisé
+   */
+  @Post('sync/batch')
+  @HttpCode(HttpStatus.OK)
+  async syncBatch(
+    @CurrentUser() user: UserPayload,
+    @Body() dto: any,
+  ) {
+    return this.observationsService.syncBatch(user.userId, dto);
   }
 }

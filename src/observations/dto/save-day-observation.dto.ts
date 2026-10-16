@@ -11,6 +11,7 @@ import { LogTemperatureDto } from './log-temperature.dto';
 import { LogCervicalMucusDto } from './log-cervical-mucus.dto';
 import { LogLhTestDto } from './log-lh-test.dto';
 import { SymptomItemDto } from './log-symptoms.dto';
+import { LogIntercourseDto } from './log-intercourse.dto';
 
 export class SaveDayObservationDto {
   @IsNotEmpty({ message: 'La date est obligatoire' })
@@ -37,6 +38,11 @@ export class SaveDayObservationDto {
   @ValidateNested({ each: true })
   @Type(() => SymptomItemDto)
   symptomes?: SymptomItemDto[];
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => LogIntercourseDto)
+  rapport?: LogIntercourseDto;
 
   @IsOptional()
   @IsUUID()
