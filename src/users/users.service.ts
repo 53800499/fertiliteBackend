@@ -78,7 +78,8 @@ export class UsersService {
       profil.dateDernieresReglesConnues = dto.dateDernieresReglesConnues;
     }
 
-    return this.profilRepo.save(profil);
+    await this.profilRepo.save(profil);
+    return this.getProfile(userId);
   }
 
   /**
