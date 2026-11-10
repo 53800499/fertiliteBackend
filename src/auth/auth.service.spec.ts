@@ -111,11 +111,11 @@ describe('AuthService (Module 1 - M1)', () => {
       await expect(service.register(validRegisterDto)).rejects.toThrow(ConflictException);
     });
 
-    it('devrait rejeter linscription si lâge déclaré est inférieur à 12 ans', async () => {
+    it('devrait rejeter linscription si lâge déclaré est inférieur à 16 ans', async () => {
       mockUtilisateurRepo.findOne.mockResolvedValue(null);
       const underAgeDto = {
         ...validRegisterDto,
-        birthDate: '2020-01-01', // Moins de 12 ans
+        birthDate: '2015-01-01', // Moins de 16 ans
       };
 
       await expect(service.register(underAgeDto)).rejects.toThrow(BadRequestException);

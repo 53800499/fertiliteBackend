@@ -19,6 +19,8 @@ import { Prediction } from '../../fertility/entities/prediction.entity';
 import { FacteurExplicatif } from '../../fertility/entities/facteur-explicatif.entity';
 import { Notification } from '../../notifications/entities/notification.entity';
 import { PreferenceNotification } from '../../notifications/entities/preference-notification.entity';
+import { Abonnement } from '../../subscriptions/entities/abonnement.entity';
+import { Parrainage } from '../../subscriptions/entities/parrainage.entity';
 
 @Module({
   imports: [
@@ -56,6 +58,8 @@ import { PreferenceNotification } from '../../notifications/entities/preference-
             FacteurExplicatif,
             Notification,
             PreferenceNotification,
+            Abonnement,
+            Parrainage,
           ],
           synchronize: configService.get<string>('NODE_ENV') !== 'production', // Uniquement en dev
           logging: configService.get<string>('NODE_ENV') === 'development',

@@ -47,7 +47,7 @@ export class AuthService {
       throw new ConflictException('Cette adresse email est déjà associée à un compte.');
     }
 
-    // 2. Vérification de l'âge minimum (12 ans)
+    // 2. Vérification de l'âge minimum (16 ans)
     const birthDate = new Date(dto.birthDate);
     const today = new Date();
     let age = today.getFullYear() - birthDate.getFullYear();
@@ -55,8 +55,8 @@ export class AuthService {
     if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
       age--;
     }
-    if (age < 12) {
-      throw new BadRequestException("L'âge minimum requis pour utiliser le service est de 12 ans.");
+    if (age < 16) {
+      throw new BadRequestException("L'âge minimum requis pour utiliser le service est de 16 ans.");
     }
 
     // 3. Vérification des consentements obligatoires (CGU et Politique de confidentialité)

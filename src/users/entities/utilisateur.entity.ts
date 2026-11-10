@@ -46,6 +46,9 @@ export class Utilisateur {
   @Column({ name: 'langue_preferee', type: 'varchar', length: 5, default: 'fr' })
   languePreferee: string;
 
+  @Column({ name: 'code_parrainage', type: 'varchar', length: 20, nullable: true, unique: true })
+  codeParrainage: string | null;
+
   @Column({ name: 'fuseau_horaire', type: 'varchar', length: 50, default: 'Africa/Porto-Novo' })
   fuseauHoraire: string;
 

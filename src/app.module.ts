@@ -8,6 +8,7 @@ import { CyclesModule } from './cycles/cycles.module';
 import { ObservationsModule } from './observations/observations.module';
 import { FertilityModule } from './fertility/fertility.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { SubscriptionsModule } from './subscriptions/subscriptions.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 
@@ -25,6 +26,7 @@ import { AppService } from './app.service';
     ObservationsModule,
     FertilityModule,
     NotificationsModule,
+    SubscriptionsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
