@@ -11,6 +11,7 @@ import {
 import { FertilityService } from './fertility.service';
 import { RecalculateFertilityDto } from './dto/recalculate-fertility.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { PremiumGuard } from '../subscriptions/guards/premium.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { UserPayload } from '../common/decorators/current-user.decorator';
 
@@ -28,9 +29,10 @@ export class FertilityController {
   }
 
   /**
-   * UC-15 : Facteurs explicatifs de la prédiction active
+   * UC-15 : Facteurs explicatifs de la prédiction active (Premium requis)
    */
   @Get('current/factors')
+  @UseGuards(PremiumGuard)
   async getCurrentFactors(@CurrentUser() user: UserPayload) {
     return this.fertilityService.getCurrentFactors(user.userId);
   }

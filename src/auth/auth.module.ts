@@ -11,6 +11,7 @@ import { ProfilUtilisateur } from '../users/entities/profil-utilisateur.entity';
 import { ParametreConfidentialite } from '../privacy/entities/parametre-confidentialite.entity';
 import { Consentement } from '../privacy/entities/consentement.entity';
 import { SessionAuthentification } from './entities/session-authentification.entity';
+import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { SessionAuthentification } from './entities/session-authentification.ent
       Consentement,
       SessionAuthentification,
     ]),
+    SubscriptionsModule,
     PassportModule.register({ defaultStrategy: 'jwt' }),
     JwtModule.registerAsync({
       imports: [ConfigModule],

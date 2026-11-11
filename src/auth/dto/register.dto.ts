@@ -46,6 +46,10 @@ export class RegisterDto {
   @IsString()
   timezone?: string;
 
+  @IsOptional()
+  @IsString()
+  referralCode?: string;
+
   @IsArray({ message: 'Les consentements doivent être fournis sous forme de liste' })
   @ValidateNested({ each: true })
   @Type(() => ConsentItemDto)

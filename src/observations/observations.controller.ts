@@ -18,6 +18,7 @@ import { LogSymptomsDto } from './dto/log-symptoms.dto';
 import { LogIntercourseDto } from './dto/log-intercourse.dto';
 import { SaveDayObservationDto } from './dto/save-day-observation.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { PremiumGuard } from '../subscriptions/guards/premium.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { UserPayload } from '../common/decorators/current-user.decorator';
 
@@ -47,9 +48,10 @@ export class ObservationsController {
   }
 
   /**
-   * UC-16 DataViz : Analyse thermique symptothermique et détection biphasique
+   * UC-16 DataViz : Analyse thermique symptothermique et détection biphasique (Premium requis)
    */
   @Get('temperature/bbt-analysis')
+  @UseGuards(PremiumGuard)
   async getBbtAnalysis(
     @CurrentUser() user: UserPayload,
     @Query('startDate') startDate?: string,

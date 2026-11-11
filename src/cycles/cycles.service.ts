@@ -12,6 +12,7 @@ import { LogFlowDto } from './dto/log-flow.dto';
 import { UpdateCycleDto } from './dto/update-cycle.dto';
 import { Optional } from '@nestjs/common';
 import { FertilityService } from '../fertility/fertility.service';
+import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 
 @Injectable()
 export class CyclesService {
@@ -22,6 +23,8 @@ export class CyclesService {
     private readonly jourReglesRepo: Repository<JourRegles>,
     @Optional()
     private readonly fertilityService?: FertilityService,
+    @Optional()
+    private readonly subscriptionsService?: SubscriptionsService,
   ) {}
 
   /**
@@ -143,14 +146,24 @@ export class CyclesService {
   }
 
   /**
-   * UC-10 : Historique de tous les cycles
+   * UC-10 : Historique des cycles (limité aux 3 derniers cycles pour les comptes gratuits)
    */
   async getCycles(userId: string): Promise<Cycle[]> {
-    return this.cycleRepo.find({
+    const cycles = await this.cycleRepo.find({
       where: { utilisateurId: userId },
       relations: { joursRegles: true },
       order: { dateDebut: 'DESC' },
     });
+
+    const shouldRestrict = this.subscriptionsService
+      ? await this.subscriptionsService.shouldRestrictFreeUser(userId)
+      : false;
+
+    if (shouldRestrict && cycles.length > 3) {
+      return cycles.slice(0, 3);
+    }
+
+    return cycles;
   }
 
   /**
@@ -266,16 +279,23 @@ export class CyclesService {
         ) / 10
       : 5.0;
 
+    const shouldRestrict = this.subscriptionsService
+      ? await this.subscriptionsService.shouldRestrictFreeUser(userId)
+      : false;
+    const isUnrestricted = !shouldRestrict;
+    const historyLimit = isUnrestricted ? 12 : 3;
+
     return {
       totalCycles,
       completedCycles,
       averageDuration,
-      minDuration,
-      maxDuration,
-      standardDeviation,
-      regularity,
+      minDuration: isUnrestricted ? minDuration : averageDuration,
+      maxDuration: isUnrestricted ? maxDuration : averageDuration,
+      standardDeviation: isUnrestricted ? standardDeviation : 0,
+      regularity: isUnrestricted ? regularity : 'indetermine',
       averagePeriodDuration,
-      history: cycles.slice(0, 12).map((c) => ({
+      premiumRestricted: shouldRestrict,
+      history: cycles.slice(0, historyLimit).map((c) => ({
         cycleId: c.id,
         dateDebut: c.dateDebut,
         dateFin: c.dateFin,
@@ -283,6 +303,21 @@ export class CyclesService {
         dureeReglesJours: c.dureeReglesJours,
         statut: c.statut,
       })),
+    };
+  }
+
+  /**
+   * Bilan médical complet (réservé aux abonnées Premium)
+   */
+  async getMedicalSummary(userId: string) {
+    const [stats, cycles] = await Promise.all([
+      this.getCycleStats(userId),
+      this.getCycles(userId),
+    ]);
+    return {
+      generatedAt: new Date().toISOString(),
+      stats,
+      cycles,
     };
   }
 }

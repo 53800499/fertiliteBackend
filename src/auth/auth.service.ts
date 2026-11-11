@@ -1,5 +1,6 @@
 import {
   Injectable,
+  Optional,
   ConflictException,
   BadRequestException,
   UnauthorizedException,
@@ -19,6 +20,7 @@ import { SessionAuthentification, PlateformeEnum } from './entities/session-auth
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
+import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 
 @Injectable()
 export class AuthService {
@@ -35,6 +37,8 @@ export class AuthService {
     private readonly sessionRepo: Repository<SessionAuthentification>,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
+    @Optional()
+    private readonly subscriptionsService?: SubscriptionsService,
   ) {}
 
   /**
@@ -69,6 +73,14 @@ export class AuthService {
     if (!hasCgu || !hasPrivacy) {
       throw new BadRequestException(
         "L'acceptation des CGU et de la politique de confidentialité est obligatoire.",
+      );
+    }
+
+    // 3b. Validation préalable du code de parrainage éventuel (utilisable uniquement à la création du compte)
+    const normalizedReferralCode = dto.referralCode?.trim();
+    if (normalizedReferralCode && this.subscriptionsService) {
+      await this.subscriptionsService.validateReferralCodeForRegistration(
+        normalizedReferralCode,
       );
     }
 
@@ -127,6 +139,16 @@ export class AuthService {
       await this.consentementRepo.save(consent);
     }
 
+    // 8b. Application du code de parrainage éventuel (bonus +30 jours marraine & filleule)
+    let referralApplied = false;
+    if (normalizedReferralCode && this.subscriptionsService) {
+      await this.subscriptionsService.applyReferralCodeOnRegistration(
+        savedUser.id,
+        normalizedReferralCode,
+      );
+      referralApplied = true;
+    }
+
     // 9. Émission des tokens et création de session
     const tokens = await this.generateTokens(savedUser.id, savedUser.email);
     await this.createSession(savedUser.id, tokens.refreshToken, 'Premier appareil', PlateformeEnum.WEB, clientIp);
@@ -138,6 +160,7 @@ export class AuthService {
         emailVerified: savedUser.emailVerifie,
       },
       tokens,
+      referralApplied,
     };
   }
 

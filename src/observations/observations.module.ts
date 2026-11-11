@@ -9,6 +9,7 @@ import { RapportSexuel } from './entities/rapport-sexuel.entity';
 import { EncryptionService } from '../common/services/encryption.service';
 import { ObservationsService } from './observations.service';
 import { ObservationsController } from './observations.controller';
+import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { ObservationsController } from './observations.controller';
       ObservationSymptome,
       RapportSexuel,
     ]),
+    SubscriptionsModule,
   ],
   controllers: [ObservationsController],
   providers: [ObservationsService, EncryptionService],

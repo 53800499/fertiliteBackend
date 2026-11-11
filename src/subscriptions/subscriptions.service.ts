@@ -3,6 +3,7 @@ import {
   NotFoundException,
   BadRequestException,
   ConflictException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, LessThan, MoreThanOrEqual } from 'typeorm';
@@ -15,9 +16,13 @@ import {
   Parrainage,
   StatutParrainageEnum,
 } from './entities/parrainage.entity';
+import { AbonnementPolitique } from './entities/abonnement-politique.entity';
 import { Utilisateur } from '../users/entities/utilisateur.entity';
 import { SubscribeDto } from './dto/subscribe.dto';
 import { ApplyReferralDto } from './dto/apply-referral.dto';
+import { InitiatePaymentDto } from './dto/initiate-payment.dto';
+import { UpdateSubscriptionPolicyDto } from './dto/update-subscription-policy.dto';
+import { FedaPayService } from './fedapay.service';
 
 @Injectable()
 export class SubscriptionsService {
@@ -26,9 +31,104 @@ export class SubscriptionsService {
     private readonly abonnementRepository: Repository<Abonnement>,
     @InjectRepository(Parrainage)
     private readonly parrainageRepository: Repository<Parrainage>,
+    @InjectRepository(AbonnementPolitique)
+    private readonly politiqueRepository: Repository<AbonnementPolitique>,
     @InjectRepository(Utilisateur)
     private readonly utilisateurRepository: Repository<Utilisateur>,
+    private readonly fedapayService: FedaPayService,
   ) {}
+
+  /**
+   * Récupère la politique globale d'abonnement définie par le Super Admin (Back-Office).
+   */
+  async getSubscriptionPolicy() {
+    let policy = await this.politiqueRepository.findOne({ where: { id: 'global' } });
+
+    if (!policy) {
+      policy = this.politiqueRepository.create({
+        id: 'global',
+        exigenceAbonnementInitiale: false,
+        exigencePaywallsPremium: true,
+        messageRecommandation:
+          'Activez Premium Sérénité (1 000 XOF/mois ou 10 000 XOF/an) pour débloquer l\'analyse BBT, le bilan médical et l\'historique illimité.',
+      });
+      policy = await this.politiqueRepository.save(policy);
+    }
+
+    return {
+      exigenceAbonnementInitiale: policy.exigenceAbonnementInitiale,
+      exigencePaywallsPremium: policy.exigencePaywallsPremium,
+      messageRecommandation:
+        policy.messageRecommandation ||
+        'Passez à Premium Sérénité pour profiter de toutes les analyses avancées.',
+      modifiePar: policy.modifiePar,
+      dateMaj: policy.dateMaj,
+    };
+  }
+
+  /**
+   * Met à jour la politique d'exigence d'abonnement depuis le Back-Office Super Admin.
+   */
+  async updateSubscriptionPolicy(
+    dto: UpdateSubscriptionPolicyDto,
+    adminActor?: string,
+  ) {
+    let policy = await this.politiqueRepository.findOne({ where: { id: 'global' } });
+
+    if (!policy) {
+      policy = this.politiqueRepository.create({
+        id: 'global',
+        exigenceAbonnementInitiale: false,
+        exigencePaywallsPremium: true,
+        messageRecommandation:
+          'Activez Premium Sérénité (1 000 XOF/mois ou 10 000 XOF/an) pour débloquer l\'analyse BBT, le bilan médical et l\'historique illimité.',
+      });
+    }
+
+    if (dto.exigenceAbonnementInitiale !== undefined) {
+      policy.exigenceAbonnementInitiale = dto.exigenceAbonnementInitiale;
+    }
+    if (dto.exigencePaywallsPremium !== undefined) {
+      policy.exigencePaywallsPremium = dto.exigencePaywallsPremium;
+    }
+    if (dto.messageRecommandation !== undefined) {
+      policy.messageRecommandation = dto.messageRecommandation.trim() || null;
+    }
+    if (adminActor) {
+      policy.modifiePar = adminActor;
+    }
+
+    const saved = await this.politiqueRepository.save(policy);
+    return {
+      message: 'Politique d\'abonnement mise à jour avec succès.',
+      policy: {
+        exigenceAbonnementInitiale: saved.exigenceAbonnementInitiale,
+        exigencePaywallsPremium: saved.exigencePaywallsPremium,
+        messageRecommandation: saved.messageRecommandation,
+        modifiePar: saved.modifiePar,
+        dateMaj: saved.dateMaj,
+      },
+    };
+  }
+
+  /**
+   * Retourne true uniquement si l'utilisatrice est gratuite ET que le Super Admin exige les paywalls Premium.
+   */
+  async shouldRestrictFreeUser(userId: string): Promise<boolean> {
+    const [isPremium, policy] = await Promise.all([
+      this.isUserPremium(userId),
+      this.getSubscriptionPolicy(),
+    ]);
+    return !isPremium && policy.exigencePaywallsPremium;
+  }
+
+  /**
+   * Indique rapidement si l'utilisatrice dispose actuellement d'un accès Premium actif.
+   */
+  async isUserPremium(userId: string): Promise<boolean> {
+    const sub = await this.getCurrentSubscription(userId);
+    return Boolean(sub?.isPremium);
+  }
 
   /**
    * Récupère l'abonnement actif courant d'une utilisatrice.
@@ -88,7 +188,7 @@ export class SubscriptionsService {
       {
         id: PlanAbonnementEnum.PREMIUM_MENSUEL,
         nom: 'Premium Sérénité (Mensuel)',
-        prix: 2500,
+        prix: 1000,
         devise: 'XOF',
         periode: 'par mois',
         description: 'La puissance de l\'algorithme avancé et le décryptage complet de vos biomarqueurs.',
@@ -106,12 +206,12 @@ export class SubscriptionsService {
       {
         id: PlanAbonnementEnum.PREMIUM_ANNUEL,
         nom: 'Premium Sérénité (Annuel)',
-        prix: 20000,
+        prix: 10000,
         devise: 'XOF',
-        periode: 'par an (~1 660 XOF/mois)',
-        description: 'Une année complète de clarté, sérénité et accompagnement avec 33% de réduction.',
+        periode: 'par an (~833 XOF/mois)',
+        description: 'Une année complète de clarté, sérénité et accompagnement avec 2 mois offerts.',
         populaire: true,
-        economie: '33% d\'économie',
+        economie: '2 mois offerts',
         avantages: [
           'Tous les avantages Premium inclus',
           '2 mois offerts par rapport au paiement mensuel',
@@ -124,9 +224,19 @@ export class SubscriptionsService {
   }
 
   /**
-   * Souscription à une formule payante (mensuelle ou annuelle)
+   * Endpoint historique de souscription directe verrouillé en production.
+   * L'activation d'un abonnement payant exige une transaction vérifiée via FedaPay.
    */
-  async subscribe(userId: string, dto: SubscribeDto) {
+  async subscribe(_userId: string, _dto: SubscribeDto) {
+    throw new ForbiddenException(
+      'La souscription directe sans paiement est désactivée. Veuillez initier et valider un paiement via FedaPay.',
+    );
+  }
+
+  /**
+   * Activation interne d'une formule payante uniquement après vérification FedaPay.
+   */
+  private async activatePaidSubscription(userId: string, dto: SubscribeDto) {
     if (dto.plan === PlanAbonnementEnum.GRATUIT) {
       throw new BadRequestException('Pour passer au plan gratuit, utilisez la résiliation.');
     }
@@ -151,7 +261,7 @@ export class SubscriptionsService {
       },
     );
 
-    const montant = dto.montant ?? (dto.plan === PlanAbonnementEnum.PREMIUM_MENSUEL ? 2500 : 20000);
+    const montant = dto.montant ?? (dto.plan === PlanAbonnementEnum.PREMIUM_MENSUEL ? 1000 : 10000);
     const devise = dto.devise ?? 'XOF';
 
     const nouvelAbonnement = this.abonnementRepository.create({
@@ -162,7 +272,7 @@ export class SubscriptionsService {
       dateFin: dateFin,
       renouvellementAutomatique: true,
       referenceTransaction: dto.referenceTransaction ?? `SUB-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-      fournisseur: dto.fournisseur ?? 'in_app',
+      fournisseur: dto.fournisseur ?? 'fedapay',
       montant,
       devise,
     });
@@ -219,11 +329,6 @@ export class SubscriptionsService {
       order: { dateCreation: 'DESC' },
     });
 
-    // Vérifie si l'utilisatrice a déjà utilisé un code d'invitation
-    const parrainageRecu = await this.parrainageRepository.findOne({
-      where: { filleulId: userId },
-    });
-
     const totalJoursGagnes = parrainages.reduce((sum, p) => sum + p.joursAccordesParrain, 0);
 
     return {
@@ -231,42 +336,49 @@ export class SubscriptionsService {
       lienPartage: `https://fertiliteapp.com/invitation?ref=${user.codeParrainage}`,
       totalFilleules: parrainages.length,
       totalJoursGagnes,
-      peutUtiliserUnCode: !parrainageRecu,
+      // Une utilisatrice déjà connectée ne peut plus utiliser un code de parrainage après inscription
+      peutUtiliserUnCode: false,
       parrainageActif: true,
       joursOffertsParFilleule: 30,
     };
   }
 
   /**
-   * Applique un code de parrainage saisi par l'utilisatrice (filleule)
+   * Valide qu'un code de parrainage saisi lors de la création de compte existe bien.
    */
-  async applyReferralCode(filleulId: string, dto: ApplyReferralDto) {
-    const code = dto.code.trim().toUpperCase();
-
-    // 1. Vérification que l'utilisatrice n'a pas déjà bénéficié d'un parrainage
-    const existing = await this.parrainageRepository.findOne({
-      where: { filleulId },
-    });
-    if (existing) {
-      throw new ConflictException('Vous avez déjà utilisé un code de parrainage.');
-    }
-
-    // 2. Recherche du parrain propriétaire du code
+  async validateReferralCodeForRegistration(
+    rawCode: string,
+  ): Promise<{ code: string; parrain: Utilisateur }> {
+    const code = rawCode.trim().toUpperCase();
     const parrain = await this.utilisateurRepository.findOne({
       where: { codeParrainage: code },
     });
     if (!parrain) {
-      throw new NotFoundException('Ce code de parrainage n\'existe pas ou est erroné.');
+      throw new BadRequestException(
+        'Ce code de parrainage n\'existe pas ou est erroné.',
+      );
     }
+    return { code, parrain };
+  }
 
-    // 3. Empêcher l'auto-parrainage
+  /**
+   * Applique un code de parrainage exclusivement au cours de la création du compte (filleule + marraine : +30 jours).
+   */
+  async applyReferralCodeOnRegistration(filleulId: string, rawCode: string) {
+    const { code, parrain } = await this.validateReferralCodeForRegistration(rawCode);
+
     if (parrain.id === filleulId) {
       throw new BadRequestException('Vous ne pouvez pas utiliser votre propre code de parrainage.');
     }
 
-    const now = new Date();
+    const existing = await this.parrainageRepository.findOne({
+      where: { filleulId },
+    });
+    if (existing) {
+      throw new ConflictException('Ce compte a déjà bénéficié d\'un code de parrainage.');
+    }
 
-    // 4. Création de l'enregistrement de parrainage
+    const now = new Date();
     const parrainage = this.parrainageRepository.create({
       parrainId: parrain.id,
       filleulId,
@@ -278,19 +390,19 @@ export class SubscriptionsService {
     });
     await this.parrainageRepository.save(parrainage);
 
-    // 5. Attribution du bonus Premium de 30 jours à la filleule
     await this.prolongOrActivatePremium(filleulId, 30, 'parrainage_filleule');
-
-    // 6. Attribution du bonus Premium de 30 jours à la marraine
     await this.prolongOrActivatePremium(parrain.id, 30, 'parrainage_marraine');
 
-    const updatedSub = await this.getCurrentSubscription(filleulId);
+    return parrainage;
+  }
 
-    return {
-      message: 'Félicitations ! Votre code a été validé avec succès. Vous bénéficiez de 30 jours d\'accès Premium offert ! 🎉',
-      bonusJours: 30,
-      abonnement: updatedSub,
-    };
+  /**
+   * Refus explicite pour toute utilisatrice déjà connectée : le code est utilisable uniquement à l'inscription.
+   */
+  async applyReferralCode(_filleulId: string, _dto: ApplyReferralDto) {
+    throw new ForbiddenException(
+      'Le code de parrainage ne peut être utilisé que lors de la création de votre compte.',
+    );
   }
 
   /**
@@ -401,7 +513,7 @@ export class SubscriptionsService {
       joursRestants,
       renouvellementAutomatique: sub.renouvellementAutomatique,
       fournisseur: sub.fournisseur,
-      montant: sub.montant,
+      montant: Number(sub.montant) || 0,
       devise: sub.devise,
       libellePlan: this.getPlanLabel(sub.plan),
       avantagesActifs: isPremium
@@ -452,5 +564,151 @@ export class SubscriptionsService {
     }
 
     return code;
+  }
+
+  /**
+   * ============================================================================
+   * PAIEMENTS FEDAPAY (MTN MoMo, Moov Money, Celtiis Cash, Visa/Mastercard)
+   * ============================================================================
+   */
+
+  /**
+   * Initialise une transaction de paiement avec l'agrégateur FedaPay
+   */
+  async initiatePayment(userId: string, dto: InitiatePaymentDto) {
+    const user = await this.utilisateurRepository.findOne({ where: { id: userId } });
+    if (!user) {
+      throw new NotFoundException('Utilisatrice introuvable.');
+    }
+
+    return this.fedapayService.initiatePayment(
+      user,
+      dto.plan,
+      dto.moyenPaiement,
+      dto.phoneNumber,
+      dto.callbackUrl,
+    );
+  }
+
+  /**
+   * Vérifie le résultat d'une transaction FedaPay et active l'abonnement
+   */
+  async verifyPayment(userId: string, transactionId: string, requestedPlan?: PlanAbonnementEnum) {
+    // 1. Idempotence : vérifier si cette transaction a déjà été traitée
+    const existingTx = await this.abonnementRepository.findOne({
+      where: { referenceTransaction: transactionId },
+    });
+
+    if (existingTx) {
+      if (existingTx.utilisateurId !== userId) {
+        throw new ForbiddenException(
+          'Cette référence de transaction est associée à un autre compte.',
+        );
+      }
+      return {
+        success: true,
+        status: 'approved',
+        message: 'Votre abonnement Premium est déjà activé pour cette transaction.',
+        abonnement: this.formatSubscriptionResponse(existingTx),
+      };
+    }
+
+    // 2. Vérification serveur-à-serveur auprès de FedaPay
+    const verification = await this.fedapayService.verifyTransaction(transactionId);
+
+    if (!verification.approved) {
+      return {
+        success: false,
+        status: verification.status,
+        message:
+          verification.status === 'rejected_simulation'
+            ? 'Les transactions simulées ne sont pas acceptées en environnement de production.'
+            : 'Le paiement n\'a pas encore été approuvé par l\'opérateur. Veuillez patienter ou réessayer.',
+      };
+    }
+
+    // 3. Vérifier l'appartenance de la transaction si les métadonnées contiennent userId
+    const metadata = verification.raw?.custom_metadata;
+    if (metadata?.userId && metadata.userId !== userId) {
+      throw new ForbiddenException('Cette transaction FedaPay ne correspond pas à votre compte.');
+    }
+
+    // 4. Récupérer le plan à partir des métadonnées et valider le montant réellement encaissé
+    let plan = requestedPlan || PlanAbonnementEnum.PREMIUM_MENSUEL;
+    if (
+      metadata?.plan &&
+      (metadata.plan === PlanAbonnementEnum.PREMIUM_MENSUEL ||
+        metadata.plan === PlanAbonnementEnum.PREMIUM_ANNUEL)
+    ) {
+      plan = metadata.plan;
+    } else if (verification.amount && Number(verification.amount) >= 10000) {
+      plan = PlanAbonnementEnum.PREMIUM_ANNUEL;
+    }
+
+    const expectedAmount = plan === PlanAbonnementEnum.PREMIUM_ANNUEL ? 10000 : 1000;
+    if (
+      verification.amount !== undefined &&
+      Number(verification.amount) < expectedAmount
+    ) {
+      throw new BadRequestException(
+        `Montant payé (${verification.amount} XOF) insuffisant pour la formule sélectionnée (${expectedAmount} XOF).`,
+      );
+    }
+
+    // 5. Activation de l'abonnement
+    const abonnement = await this.activatePaidSubscription(userId, {
+      plan,
+      referenceTransaction: transactionId,
+      fournisseur: 'fedapay',
+      montant: Number(verification.amount) || expectedAmount,
+      devise: 'XOF',
+    });
+
+    return {
+      success: true,
+      status: 'approved',
+      message: 'Félicitations ! Votre abonnement Premium a été activé avec succès.',
+      abonnement,
+    };
+  }
+
+  /**
+   * Traitement du Webhook FedaPay
+   */
+  async handleFedaPayWebhook(payload: any) {
+    const event = payload?.name || payload?.event;
+    const entity = payload?.entity || payload?.v1?.entity || payload;
+
+    if (event === 'transaction.approved' || entity?.status === 'approved') {
+      const transactionId = String(entity?.id || '');
+      const userId = entity?.custom_metadata?.userId;
+      const plan = entity?.custom_metadata?.plan || PlanAbonnementEnum.PREMIUM_MENSUEL;
+
+      if (transactionId && userId) {
+        const existingTx = await this.abonnementRepository.findOne({
+          where: { referenceTransaction: transactionId },
+        });
+        if (existingTx) {
+          return { received: true, alreadyProcessed: true };
+        }
+
+        // Double vérification serveur-à-serveur auprès de l'API FedaPay
+        const verification = await this.fedapayService.verifyTransaction(transactionId);
+        const expectedAmount = plan === PlanAbonnementEnum.PREMIUM_ANNUEL ? 10000 : 1000;
+        const paidAmount = Number(verification.amount || 0);
+
+        if (verification.approved && (paidAmount === 0 || paidAmount >= expectedAmount)) {
+          await this.activatePaidSubscription(userId, {
+            plan,
+            referenceTransaction: transactionId,
+            fournisseur: 'fedapay',
+            montant: paidAmount || expectedAmount,
+            devise: 'XOF',
+          });
+        }
+      }
+    }
+
+    return { received: true };
   }
 }

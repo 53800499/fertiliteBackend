@@ -15,6 +15,7 @@ import { StartCycleDto } from './dto/start-cycle.dto';
 import { LogFlowDto } from './dto/log-flow.dto';
 import { UpdateCycleDto } from './dto/update-cycle.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { PremiumGuard } from '../subscriptions/guards/premium.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { UserPayload } from '../common/decorators/current-user.decorator';
 
@@ -63,6 +64,15 @@ export class CyclesController {
   @Get('stats')
   async getCycleStats(@CurrentUser() user: UserPayload) {
     return this.cyclesService.getCycleStats(user.userId);
+  }
+
+  /**
+   * Bilan médical synthétique complet (Premium requis)
+   */
+  @Get('medical-summary')
+  @UseGuards(PremiumGuard)
+  async getMedicalSummary(@CurrentUser() user: UserPayload) {
+    return this.cyclesService.getMedicalSummary(user.userId);
   }
 
   /**

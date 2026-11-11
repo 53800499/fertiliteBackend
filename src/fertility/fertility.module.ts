@@ -7,6 +7,7 @@ import { ProfilUtilisateur } from '../users/entities/profil-utilisateur.entity';
 import { Cycle } from '../cycles/entities/cycle.entity';
 import { JourRegles } from '../cycles/entities/jour-regles.entity';
 import { ObservationsModule } from '../observations/observations.module';
+import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 import { FertilityService } from './fertility.service';
 import { FertilityController } from './fertility.controller';
 import { CalendarController } from './calendar.controller';
@@ -29,6 +30,7 @@ import { HybridEngine } from './engines/hybrid.engine';
       JourRegles,
     ]),
     ObservationsModule,
+    SubscriptionsModule,
   ],
   controllers: [FertilityController, CalendarController],
   providers: [

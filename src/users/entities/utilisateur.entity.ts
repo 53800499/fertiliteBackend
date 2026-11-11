@@ -18,6 +18,12 @@ export enum StatutCompteEnum {
   SUPPRIME = 'supprime',
 }
 
+export enum RoleUtilisateurEnum {
+  UTILISATRICE = 'utilisatrice',
+  ADMIN = 'admin',
+  SUPER_ADMIN = 'super_admin',
+}
+
 @Entity('utilisateur')
 export class Utilisateur {
   @PrimaryGeneratedColumn('uuid')
@@ -39,6 +45,14 @@ export class Utilisateur {
     default: StatutCompteEnum.ACTIF,
   })
   statutCompte: StatutCompteEnum;
+
+  @Column({
+    name: 'role',
+    type: 'enum',
+    enum: RoleUtilisateurEnum,
+    default: RoleUtilisateurEnum.UTILISATRICE,
+  })
+  role: RoleUtilisateurEnum;
 
   @Column({ name: 'email_verifie', type: 'boolean', default: false })
   emailVerifie: boolean;

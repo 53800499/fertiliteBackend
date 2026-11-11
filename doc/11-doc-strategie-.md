@@ -87,6 +87,6 @@ Lorsque le modèle ML de Niveau 3 est validé scientifiquement :
 2. Il est enregistré dans `version_moteur_prediction` :
    ```sql
    INSERT INTO version_moteur_prediction (numero_version, type_moteur, metriques_performance)
-   VALUES ('v3.0-ml-xgboost', 'machine_learning', '{"mae": 1.2, "brier_score": 0.08, "train_size": 25000}');
+   VALUES ('v3.0-ml-xgboost', 'machine_learning', '{"mae": 1.2, "brier_score": 0.08, "train_size": 10000}');
    ```
 3. Il est exposé via un microservice d'inférence sécurisé (FastAPI) consommé par l'adaptateur `MLFertilityEstimator` de NestJS.

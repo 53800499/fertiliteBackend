@@ -5,11 +5,13 @@ import { JourRegles } from './entities/jour-regles.entity';
 import { CyclesService } from './cycles.service';
 import { CyclesController } from './cycles.controller';
 import { FertilityModule } from '../fertility/fertility.module';
+import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Cycle, JourRegles]),
     forwardRef(() => FertilityModule),
+    SubscriptionsModule,
   ],
   controllers: [CyclesController],
   providers: [CyclesService],

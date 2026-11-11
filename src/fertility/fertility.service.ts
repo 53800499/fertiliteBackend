@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   Logger,
+  Optional,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource, Between } from 'typeorm';
@@ -24,6 +25,7 @@ import { ProfilUtilisateur } from '../users/entities/profil-utilisateur.entity';
 import { Cycle, StatutCycleEnum } from '../cycles/entities/cycle.entity';
 import { JourRegles } from '../cycles/entities/jour-regles.entity';
 import { ObservationsService } from '../observations/observations.service';
+import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import {
   FertilityPredictionResponseDto,
   FactorResponseDto,
@@ -53,6 +55,8 @@ export class FertilityService {
     private readonly hybridEngine: HybridEngine,
     private readonly observationsService: ObservationsService,
     private readonly dataSource: DataSource,
+    @Optional()
+    private readonly subscriptionsService?: SubscriptionsService,
   ) {}
 
   /**
@@ -239,10 +243,14 @@ export class FertilityService {
       return this.calculateAndSavePrediction(userId);
     }
 
-    // Tri des facteurs par ordre d'affichage
-    const sortedFactors = (active.facteurs || []).sort(
-      (a, b) => a.ordreAffichage - b.ordreAffichage,
-    );
+    // Tri des facteurs par ordre d'affichage (réservés aux abonnées Premium si restriction active)
+    const shouldRestrict = this.subscriptionsService
+      ? await this.subscriptionsService.shouldRestrictFreeUser(userId)
+      : false;
+
+    const sortedFactors = !shouldRestrict
+      ? (active.facteurs || []).sort((a, b) => a.ordreAffichage - b.ordreAffichage)
+      : [];
 
     const factorsDto: FactorResponseDto[] = sortedFactors.map((f) => ({
       id: f.id,
