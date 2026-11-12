@@ -1,5 +1,6 @@
 import {
   Injectable,
+  Logger,
   NotFoundException,
   BadRequestException,
   ConflictException,
@@ -26,6 +27,10 @@ import { FedaPayService } from './fedapay.service';
 
 @Injectable()
 export class SubscriptionsService {
+  private readonly logger = new Logger(SubscriptionsService.name);
+  private static readonly DEFAULT_RECOMMENDATION_MESSAGE =
+    'Activez Premium Sérénité (1 000 XOF/mois ou 10 000 XOF/an) pour débloquer l\'analyse BBT, le bilan médical et l\'historique illimité.';
+
   constructor(
     @InjectRepository(Abonnement)
     private readonly abonnementRepository: Repository<Abonnement>,
@@ -42,28 +47,40 @@ export class SubscriptionsService {
    * Récupère la politique globale d'abonnement définie par le Super Admin (Back-Office).
    */
   async getSubscriptionPolicy() {
-    let policy = await this.politiqueRepository.findOne({ where: { id: 'global' } });
+    try {
+      let policy = await this.politiqueRepository.findOne({ where: { id: 'global' } });
 
-    if (!policy) {
-      policy = this.politiqueRepository.create({
-        id: 'global',
+      if (!policy) {
+        policy = this.politiqueRepository.create({
+          id: 'global',
+          exigenceAbonnementInitiale: false,
+          exigencePaywallsPremium: true,
+          messageRecommandation: SubscriptionsService.DEFAULT_RECOMMENDATION_MESSAGE,
+        });
+        policy = await this.politiqueRepository.save(policy);
+      }
+
+      return {
+        exigenceAbonnementInitiale: policy.exigenceAbonnementInitiale,
+        exigencePaywallsPremium: policy.exigencePaywallsPremium,
+        messageRecommandation:
+          policy.messageRecommandation ||
+          'Passez à Premium Sérénité pour profiter de toutes les analyses avancées.',
+        modifiePar: policy.modifiePar,
+        dateMaj: policy.dateMaj,
+      };
+    } catch (error) {
+      this.logger.warn(
+        `Repli sur la politique d'abonnement par défaut : ${(error as Error).message}`,
+      );
+      return {
         exigenceAbonnementInitiale: false,
         exigencePaywallsPremium: true,
-        messageRecommandation:
-          'Activez Premium Sérénité (1 000 XOF/mois ou 10 000 XOF/an) pour débloquer l\'analyse BBT, le bilan médical et l\'historique illimité.',
-      });
-      policy = await this.politiqueRepository.save(policy);
+        messageRecommandation: SubscriptionsService.DEFAULT_RECOMMENDATION_MESSAGE,
+        modifiePar: null,
+        dateMaj: new Date(),
+      };
     }
-
-    return {
-      exigenceAbonnementInitiale: policy.exigenceAbonnementInitiale,
-      exigencePaywallsPremium: policy.exigencePaywallsPremium,
-      messageRecommandation:
-        policy.messageRecommandation ||
-        'Passez à Premium Sérénité pour profiter de toutes les analyses avancées.',
-      modifiePar: policy.modifiePar,
-      dateMaj: policy.dateMaj,
-    };
   }
 
   /**
@@ -80,8 +97,7 @@ export class SubscriptionsService {
         id: 'global',
         exigenceAbonnementInitiale: false,
         exigencePaywallsPremium: true,
-        messageRecommandation:
-          'Activez Premium Sérénité (1 000 XOF/mois ou 10 000 XOF/an) pour débloquer l\'analyse BBT, le bilan médical et l\'historique illimité.',
+        messageRecommandation: SubscriptionsService.DEFAULT_RECOMMENDATION_MESSAGE,
       });
     }
 
@@ -115,11 +131,18 @@ export class SubscriptionsService {
    * Retourne true uniquement si l'utilisatrice est gratuite ET que le Super Admin exige les paywalls Premium.
    */
   async shouldRestrictFreeUser(userId: string): Promise<boolean> {
-    const [isPremium, policy] = await Promise.all([
-      this.isUserPremium(userId),
-      this.getSubscriptionPolicy(),
-    ]);
-    return !isPremium && policy.exigencePaywallsPremium;
+    try {
+      const [isPremium, policy] = await Promise.all([
+        this.isUserPremium(userId),
+        this.getSubscriptionPolicy(),
+      ]);
+      return !isPremium && policy.exigencePaywallsPremium;
+    } catch (error) {
+      this.logger.warn(
+        `Fallback shouldRestrictFreeUser pour ${userId} : ${(error as Error).message}`,
+      );
+      return true;
+    }
   }
 
   /**
@@ -677,7 +700,11 @@ export class SubscriptionsService {
    */
   async handleFedaPayWebhook(payload: any) {
     const event = payload?.name || payload?.event;
-    const entity = payload?.entity || payload?.v1?.entity || payload;
+    const entity =
+      payload?.entity ||
+      payload?.['v1/transaction'] ||
+      payload?.v1?.entity ||
+      payload;
 
     if (event === 'transaction.approved' || entity?.status === 'approved') {
       const transactionId = String(entity?.id || '');
@@ -697,7 +724,10 @@ export class SubscriptionsService {
         const expectedAmount = plan === PlanAbonnementEnum.PREMIUM_ANNUEL ? 10000 : 1000;
         const paidAmount = Number(verification.amount || 0);
 
-        if (verification.approved && (paidAmount === 0 || paidAmount >= expectedAmount)) {
+        if (
+          verification.approved &&
+          (verification.amount === undefined || paidAmount >= expectedAmount)
+        ) {
           await this.activatePaidSubscription(userId, {
             plan,
             referenceTransaction: transactionId,

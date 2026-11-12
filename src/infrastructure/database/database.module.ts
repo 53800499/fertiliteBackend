@@ -1,6 +1,7 @@
-import { Module } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
+import { Logger, Module, OnModuleInit } from '@nestjs/common';
+import { InjectDataSource, TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { DataSource } from 'typeorm';
 import { Utilisateur } from '../../users/entities/utilisateur.entity';
 import { ProfilUtilisateur } from '../../users/entities/profil-utilisateur.entity';
 import { ParametreConfidentialite } from '../../privacy/entities/parametre-confidentialite.entity';
@@ -21,6 +22,7 @@ import { Notification } from '../../notifications/entities/notification.entity';
 import { PreferenceNotification } from '../../notifications/entities/preference-notification.entity';
 import { Abonnement } from '../../subscriptions/entities/abonnement.entity';
 import { Parrainage } from '../../subscriptions/entities/parrainage.entity';
+import { AbonnementPolitique } from '../../subscriptions/entities/abonnement-politique.entity';
 
 @Module({
   imports: [
@@ -60,7 +62,9 @@ import { Parrainage } from '../../subscriptions/entities/parrainage.entity';
             PreferenceNotification,
             Abonnement,
             Parrainage,
+            AbonnementPolitique,
           ],
+          autoLoadEntities: true,
           synchronize: configService.get<string>('NODE_ENV') !== 'production', // Uniquement en dev
           logging: configService.get<string>('NODE_ENV') === 'development',
           ssl: sslOption,
@@ -85,4 +89,54 @@ import { Parrainage } from '../../subscriptions/entities/parrainage.entity';
     }),
   ],
 })
-export class DatabaseModule {}
+export class DatabaseModule implements OnModuleInit {
+  private readonly logger = new Logger(DatabaseModule.name);
+
+  constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
+
+  async onModuleInit(): Promise<void> {
+    try {
+      await this.dataSource.query(`
+        DO $$ BEGIN
+          CREATE TYPE "public"."utilisateur_role_enum" AS ENUM('utilisatrice', 'admin', 'super_admin');
+        EXCEPTION
+          WHEN duplicate_object THEN NULL;
+        END $$;
+      `);
+      await this.dataSource.query(`
+        ALTER TABLE "utilisateur"
+        ADD COLUMN IF NOT EXISTS "role" "public"."utilisateur_role_enum" NOT NULL DEFAULT 'utilisatrice';
+      `);
+      await this.dataSource.query(`
+        CREATE TABLE IF NOT EXISTS "abonnement_politique" (
+          "id" character varying(32) NOT NULL DEFAULT 'global',
+          "exigence_abonnement_initiale" boolean NOT NULL DEFAULT false,
+          "exigence_paywalls_premium" boolean NOT NULL DEFAULT true,
+          "message_recommandation" text,
+          "modifie_par" character varying(255),
+          "date_maj" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+          CONSTRAINT "PK_abonnement_politique_id" PRIMARY KEY ("id")
+        );
+      `);
+      await this.dataSource.query(`
+        INSERT INTO "abonnement_politique" (
+          "id",
+          "exigence_abonnement_initiale",
+          "exigence_paywalls_premium",
+          "message_recommandation"
+        )
+        VALUES (
+          'global',
+          false,
+          true,
+          'Activez Premium Sérénité (1 000 XOF/mois ou 10 000 XOF/an) pour débloquer l''analyse BBT, le bilan médical et l''historique illimité.'
+        )
+        ON CONFLICT ("id") DO NOTHING;
+      `);
+    } catch (error) {
+      this.logger.warn(
+        `Initialisation idempotente du schéma ignorée : ${(error as Error).message}`,
+      );
+    }
+  }
+}

@@ -6,7 +6,9 @@ import {
   Patch,
   Body,
   Param,
+  Query,
   Req,
+  Header,
   UseGuards,
   HttpCode,
   HttpStatus,
@@ -113,6 +115,53 @@ export class SubscriptionWebhookController {
   @HttpCode(HttpStatus.OK)
   async handleWebhook(@Body() payload: any) {
     return this.subscriptionsService.handleFedaPayWebhook(payload);
+  }
+
+  @Get('fedapay-webhook')
+  @Header('Content-Type', 'text/html; charset=utf-8')
+  handleWebhookBrowserReturn(
+    @Query('id') id?: string,
+    @Query('status') status?: string,
+  ): string {
+    return this.buildCheckoutReturnHtml(id, status);
+  }
+
+  @Get('fedapay-callback')
+  @Header('Content-Type', 'text/html; charset=utf-8')
+  handleCheckoutCallback(
+    @Query('id') id?: string,
+    @Query('status') status?: string,
+  ): string {
+    return this.buildCheckoutReturnHtml(id, status);
+  }
+
+  private buildCheckoutReturnHtml(id?: string, status?: string): string {
+    const safeStatus = (status || 'pending').replace(/[^a-zA-Z0-9_-]/g, '');
+    const safeId = (id || '').replace(/[^a-zA-Z0-9_-]/g, '');
+    const isApproved = safeStatus.toLowerCase() === 'approved';
+    return `<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>FertiliteApp - Retour Paiement FedaPay</title>
+  <style>
+    body { font-family: system-ui, -apple-system, sans-serif; background: #FFF7F9; color: #1F2937; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 24px; }
+    .card { max-width: 420px; width: 100%; background: #fff; border-radius: 20px; padding: 28px; box-shadow: 0 12px 32px rgba(0,0,0,0.08); text-align: center; }
+    .badge { display: inline-block; padding: 6px 14px; border-radius: 999px; font-weight: 700; font-size: 13px; background: ${isApproved ? '#ECFDF5' : '#FEF3C7'}; color: ${isApproved ? '#047857' : '#B45309'}; }
+    h1 { font-size: 20px; margin: 16px 0 8px; }
+    p { font-size: 14px; line-height: 1.5; color: #4B5563; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="badge">${isApproved ? 'Paiement validé' : 'Retour FedaPay'}</div>
+    <h1>Retournez dans FertiliteApp</h1>
+    <p>Vous pouvez fermer cette page et appuyer sur <strong>« Vérifier mon paiement »</strong> dans l'application pour activer immédiatement votre abonnement Premium.</p>
+    ${safeId ? `<p style="font-size:12px;color:#6B7280;">Référence : ${safeId}</p>` : ''}
+  </div>
+</body>
+</html>`;
   }
 }
 

@@ -223,7 +223,16 @@ export class FertilityService {
       await queryRunner.release();
     }
 
-    return this.mapToResponseDto(savedPrediction, output.factors, engineVersion.numeroVersion, output.algorithm);
+    const shouldRestrict = this.subscriptionsService
+      ? await this.subscriptionsService.shouldRestrictFreeUser(userId)
+      : false;
+
+    return this.mapToResponseDto(
+      savedPrediction,
+      shouldRestrict ? [] : output.factors,
+      engineVersion.numeroVersion,
+      output.algorithm,
+    );
   }
 
   /**
@@ -292,15 +301,22 @@ export class FertilityService {
    * Historique immuable des estimations
    */
   async getPredictionHistory(userId: string, limit = 10): Promise<FertilityPredictionResponseDto[]> {
-    const predictions = await this.predictionRepo.find({
-      where: { utilisateurId: userId },
-      relations: { facteurs: true, versionMoteur: true },
-      order: { dateGeneration: 'DESC' },
-      take: limit,
-    });
+    const [predictions, shouldRestrict] = await Promise.all([
+      this.predictionRepo.find({
+        where: { utilisateurId: userId },
+        relations: { facteurs: true, versionMoteur: true },
+        order: { dateGeneration: 'DESC' },
+        take: limit,
+      }),
+      this.subscriptionsService
+        ? this.subscriptionsService.shouldRestrictFreeUser(userId)
+        : Promise.resolve(false),
+    ]);
 
     return predictions.map((p) => {
-      const sortedFactors = (p.facteurs || []).sort((a, b) => a.ordreAffichage - b.ordreAffichage);
+      const sortedFactors = !shouldRestrict
+        ? (p.facteurs || []).sort((a, b) => a.ordreAffichage - b.ordreAffichage)
+        : [];
       return {
         predictionId: p.id,
         generationDate: p.dateGeneration,

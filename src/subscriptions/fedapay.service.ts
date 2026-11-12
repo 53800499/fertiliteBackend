@@ -100,7 +100,8 @@ export class FedaPayService {
         `Clés FedaPay non configurées (FEDAPAY_SECRET_KEY). Mode simulation sandbox activé pour l'utilisatrice ${user.id}.`,
       );
 
-      const simId = `FEDASIM-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+      const simPrefix = plan === PlanAbonnementEnum.PREMIUM_ANNUEL ? 'FEDASIM-ANN' : 'FEDASIM-MEN';
+      const simId = `${simPrefix}-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
       return {
         transactionId: simId,
         token: `sim_token_${Date.now()}`,
@@ -164,7 +165,14 @@ export class FedaPayService {
       }
 
       const txData: any = await response.json();
-      const transaction = txData.v1?.transaction || txData.transaction || txData;
+      const transaction =
+        txData['v1/transaction'] || txData.v1?.transaction || txData.transaction || txData;
+      if (!transaction?.id) {
+        this.logger.error(`Réponse FedaPay inattendue (id manquant): ${JSON.stringify(txData)}`);
+        throw new BadRequestException(
+          'Réponse invalide de la passerelle FedaPay lors de la création de la transaction.',
+        );
+      }
       const transactionId = String(transaction.id);
 
       // 2. Génération du Checkout Token FedaPay
@@ -184,8 +192,10 @@ export class FedaPayService {
 
       if (tokenResponse.ok) {
         const tokenData: any = await tokenResponse.json();
-        token = tokenData.token || '';
+        const tokenObj = tokenData['v1/token'] || tokenData;
+        token = tokenObj.token || tokenData.token || '';
         checkoutUrl =
+          tokenObj.url ||
           tokenData.url ||
           (this.environment === 'live'
             ? `https://checkout.fedapay.com/v1/?token=${token}`
@@ -234,11 +244,12 @@ export class FedaPayService {
         };
       }
 
+      const simAmount = transactionId.startsWith('FEDASIM-ANN-') ? 10000 : 1000;
       return {
         approved: true,
         transactionId,
         status: 'approved',
-        amount: 1000,
+        amount: simAmount,
       };
     }
 
@@ -254,11 +265,12 @@ export class FedaPayService {
         };
       }
 
+      const simAmount = transactionId.startsWith('FEDASIM-ANN-') ? 10000 : 1000;
       return {
         approved: true,
         transactionId,
         status: 'approved',
-        amount: 1000,
+        amount: simAmount,
       };
     }
 
@@ -282,7 +294,8 @@ export class FedaPayService {
       }
 
       const data: any = await response.json();
-      const transaction = data.v1?.transaction || data.transaction || data;
+      const transaction =
+        data['v1/transaction'] || data.v1?.transaction || data.transaction || data;
       const status = (transaction.status || '').toLowerCase();
 
       return {
