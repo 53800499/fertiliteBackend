@@ -204,6 +204,7 @@ export class AuthService {
         id: user.id,
         email: user.email,
         emailVerified: user.emailVerifie,
+        role: user.role,
       },
       tokens,
     };

@@ -39,6 +39,7 @@ export class UsersService {
     return {
       id: user.id,
       email: user.email,
+      role: user.role,
       dateNaissance: user.dateNaissance,
       languePreferee: user.languePreferee,
       fuseauHoraire: user.fuseauHoraire,
