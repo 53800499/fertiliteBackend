@@ -9,7 +9,7 @@ import { ObservationsModule } from './observations/observations.module';
 import { FertilityModule } from './fertility/fertility.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { SubscriptionsModule } from './subscriptions/subscriptions.module';
-import { SuperAdminModule } from './super-admin/super-admin.module';
+import { AdminModule } from './admin/admin.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 
@@ -28,7 +28,7 @@ import { AppService } from './app.service';
     FertilityModule,
     NotificationsModule,
     SubscriptionsModule,
-    SuperAdminModule,
+    AdminModule,
   ],
   controllers: [AppController],
   providers: [AppService],
