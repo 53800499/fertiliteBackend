@@ -2,11 +2,16 @@ import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import {
+  RoleUtilisateurEnum,
   StatutCompteEnum,
   Utilisateur,
 } from '../../users/entities/utilisateur.entity';
 import { SessionAuthentification } from '../../auth/entities/session-authentification.entity';
-import { Abonnement } from '../../subscriptions/entities/abonnement.entity';
+import {
+  Abonnement,
+  PlanAbonnementEnum,
+  StatutAbonnementEnum,
+} from '../../subscriptions/entities/abonnement.entity';
 import { Consentement } from '../../privacy/entities/consentement.entity';
 import {
   ADMIN_AUDIT_LOGGER,
@@ -162,6 +167,71 @@ export class AdminUsersService {
     await this.sessionRepo.update({ utilisateurId: userId }, { revoque: true });
     await this.auditLogger.log(actor, 'security', 'REVOKE_USER_SESSIONS', 'utilisateur', userId);
     return { success: true, message: 'Toutes les sessions actives ont été révoquées.' };
+  }
+
+  async updateUserRole(userId: string, role: RoleUtilisateurEnum, actor: AdminActor) {
+    const user = await this.userRepo.findOne({ where: { id: userId } });
+    if (!user) throw new NotFoundException('Utilisatrice introuvable.');
+
+    const previousRole = user.role;
+    user.role = role;
+    await this.userRepo.save(user);
+
+    await this.auditLogger.log(actor, 'users', 'UPDATE_USER_ROLE', 'utilisateur', userId, {
+      previousRole,
+      newRole: role,
+    });
+    return { id: user.id, role: user.role };
+  }
+
+  async grantUserSubscription(
+    userId: string,
+    plan: PlanAbonnementEnum,
+    durationDays: number = 30,
+    actor: AdminActor,
+  ) {
+    const user = await this.userRepo.findOne({ where: { id: userId } });
+    if (!user) throw new NotFoundException('Utilisatrice introuvable.');
+
+    const now = new Date();
+    const dateFin = new Date(now.getTime() + durationDays * 86400000);
+
+    const subscription = this.abonnementRepo.create({
+      utilisateurId: userId,
+      plan: plan || PlanAbonnementEnum.PREMIUM_MENSUEL,
+      statut: StatutAbonnementEnum.ACTIF,
+      montant: 0,
+      devise: 'XOF',
+      fournisseur: 'ADMIN_GRANT',
+      referenceTransaction: `GRANT_${Date.now()}_${userId.slice(0, 8)}`,
+      dateDebut: now,
+      dateFin,
+      renouvellementAutomatique: false,
+    });
+
+    const saved = await this.abonnementRepo.save(subscription);
+
+    await this.auditLogger.log(actor, 'subscriptions', 'ADMIN_GRANT_SUBSCRIPTION', 'abonnement', saved.id, {
+      userId,
+      plan: saved.plan,
+      durationDays,
+    });
+
+    return saved;
+  }
+
+  async deleteUser(userId: string, actor: AdminActor) {
+    const user = await this.userRepo.findOne({ where: { id: userId } });
+    if (!user) throw new NotFoundException('Utilisatrice introuvable.');
+
+    await this.sessionRepo.delete({ utilisateurId: userId });
+    await this.userRepo.delete(userId);
+
+    await this.auditLogger.log(actor, 'users', 'DELETE_USER', 'utilisateur', userId, {
+      email: user.email,
+    });
+
+    return { deleted: true, id: userId };
   }
 }
 

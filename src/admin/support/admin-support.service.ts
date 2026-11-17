@@ -77,5 +77,11 @@ export class AdminSupportService {
     await this.auditLogger.log(actor, 'support', 'REPLY_TICKET', 'ticket', id);
     return saved;
   }
+
+  async deleteTicket(id: string, actor: AdminActor) {
+    await this.ticketRepo.delete(id);
+    await this.auditLogger.log(actor, 'support', 'DELETE_TICKET', 'ticket', id);
+    return { deleted: true, id };
+  }
 }
 

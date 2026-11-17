@@ -70,5 +70,11 @@ export class AdminCampaignsService {
     });
     return saved;
   }
+
+  async deleteCampaign(id: string, actor: AdminActor) {
+    await this.campaignRepo.delete(id);
+    await this.auditLogger.log(actor, 'campaigns', 'DELETE_CAMPAIGN', 'campagne', id);
+    return { deleted: true, id };
+  }
 }
 

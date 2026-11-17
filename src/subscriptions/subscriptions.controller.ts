@@ -9,6 +9,7 @@ import {
   Query,
   Req,
   Header,
+  Headers,
   UseGuards,
   HttpCode,
   HttpStatus,
@@ -113,8 +114,11 @@ export class SubscriptionWebhookController {
 
   @Post('fedapay-webhook')
   @HttpCode(HttpStatus.OK)
-  async handleWebhook(@Body() payload: any) {
-    return this.subscriptionsService.handleFedaPayWebhook(payload);
+  async handleWebhook(
+    @Body() payload: any,
+    @Headers('x-fedapay-signature') signature?: string,
+  ) {
+    return this.subscriptionsService.handleFedaPayWebhook(payload, signature);
   }
 
   @Get('fedapay-webhook')

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Req, UseGuards } from '@nestjs/common';
 import { SuperAdminGuard } from '../../subscriptions/guards/super-admin.guard';
 import { extractAdminActor } from '../shared/admin-actor.helper';
 import { AdminOffersService } from './admin-offers.service';
@@ -16,6 +16,16 @@ export class AdminOffersController {
   @Post()
   upsertOffer(@Body() body: any, @Req() req: any) {
     return this.offersService.upsertOffer(body, extractAdminActor(req));
+  }
+
+  @Patch(':id/toggle')
+  toggleOffer(@Param('id') id: string, @Body('actif') actif: boolean, @Req() req: any) {
+    return this.offersService.toggleOffer(id, actif, extractAdminActor(req));
+  }
+
+  @Delete(':id')
+  deleteOffer(@Param('id') id: string, @Req() req: any) {
+    return this.offersService.deleteOffer(id, extractAdminActor(req));
   }
 }
 

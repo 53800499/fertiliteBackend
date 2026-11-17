@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Req, UseGuards } from '@nestjs/common';
 import { SuperAdminGuard } from '../../subscriptions/guards/super-admin.guard';
 import { extractAdminActor } from '../shared/admin-actor.helper';
 import { AdminCampaignsService } from './admin-campaigns.service';
@@ -21,6 +21,11 @@ export class AdminCampaignsController {
   @Post(':id/send')
   sendCampaign(@Param('id') id: string, @Req() req: any) {
     return this.campaignsService.sendCampaign(id, extractAdminActor(req));
+  }
+
+  @Delete(':id')
+  deleteCampaign(@Param('id') id: string, @Req() req: any) {
+    return this.campaignsService.deleteCampaign(id, extractAdminActor(req));
   }
 }
 

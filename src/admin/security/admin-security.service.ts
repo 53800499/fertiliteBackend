@@ -113,5 +113,31 @@ export class AdminSecurityService {
       deletionRequests,
     };
   }
+
+  async demoteAdmin(adminId: string, actor: AdminActor) {
+    const user = await this.userRepo.findOne({ where: { id: adminId } });
+    if (!user) throw new BadRequestException('Administrateur introuvable.');
+
+    user.role = RoleUtilisateurEnum.UTILISATRICE;
+    await this.userRepo.save(user);
+
+    await this.auditLogger.log(actor, 'security', 'DEMOTE_ADMIN', 'utilisateur', adminId, {
+      email: user.email,
+    });
+    return { id: adminId, role: user.role };
+  }
+
+  async purgeGdprUser(userId: string, actor: AdminActor) {
+    const user = await this.userRepo.findOne({ where: { id: userId } });
+    if (!user) throw new BadRequestException('Utilisatrice introuvable.');
+
+    await this.consentRepo.delete({ utilisateurId: userId });
+    await this.userRepo.delete(userId);
+
+    await this.auditLogger.log(actor, 'privacy', 'PURGE_GDPR_USER', 'utilisateur', userId, {
+      email: user.email,
+    });
+    return { purged: true, id: userId };
+  }
 }
 

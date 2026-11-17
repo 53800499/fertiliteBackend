@@ -59,5 +59,11 @@ export class AdminPromotionsService {
     await this.auditLogger.log(actor, 'promotions', 'TOGGLE_PROMO', 'code_promo', id, { actif });
     return saved;
   }
+
+  async deletePromo(id: string, actor: AdminActor) {
+    await this.promoRepo.delete(id);
+    await this.auditLogger.log(actor, 'promotions', 'DELETE_PROMO', 'code_promo', id);
+    return { deleted: true, id };
+  }
 }
 

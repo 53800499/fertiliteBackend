@@ -117,5 +117,25 @@ export class AdminPaymentsService {
       .join('\n');
     return header + rows;
   }
+
+  async updatePaymentStatus(
+    abonnementId: string,
+    statut: StatutAbonnementEnum,
+    actor: AdminActor,
+  ) {
+    const sub = await this.abonnementRepo.findOne({ where: { id: abonnementId } });
+    if (!sub) throw new NotFoundException('Transaction introuvable.');
+
+    const previous = sub.statut;
+    sub.statut = statut;
+    const saved = await this.abonnementRepo.save(sub);
+
+    await this.auditLogger.log(actor, 'payments', 'UPDATE_PAYMENT_STATUS', 'abonnement', abonnementId, {
+      previous,
+      next: statut,
+    });
+
+    return saved;
+  }
 }
 

@@ -113,5 +113,20 @@ export class AdminOffersService {
     });
     return saved;
   }
+
+  async toggleOffer(id: string, actif: boolean, actor: AdminActor) {
+    const offer = await this.offerRepo.findOne({ where: { id } });
+    if (!offer) throw new BadRequestException('Offre introuvable.');
+    offer.actif = actif;
+    const saved = await this.offerRepo.save(offer);
+    await this.auditLogger.log(actor, 'subscriptions', 'TOGGLE_OFFER', 'offre', id, { actif });
+    return saved;
+  }
+
+  async deleteOffer(id: string, actor: AdminActor) {
+    await this.offerRepo.delete(id);
+    await this.auditLogger.log(actor, 'subscriptions', 'DELETE_OFFER', 'offre', id);
+    return { deleted: true, id };
+  }
 }
 

@@ -5,6 +5,7 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, LessThan, MoreThanOrEqual } from 'typeorm';
@@ -258,6 +259,8 @@ export class SubscriptionsService {
 
   /**
    * Activation interne d'une formule payante uniquement après vérification FedaPay.
+   * Gère la prolongation intelligente en cas de réabonnement avant échéance et applique
+   * un prix strictement déterminé par le serveur (Zero Trust).
    */
   private async activatePaidSubscription(userId: string, dto: SubscribeDto) {
     if (dto.plan === PlanAbonnementEnum.GRATUIT) {
@@ -265,13 +268,29 @@ export class SubscriptionsService {
     }
 
     const now = new Date();
-    const dateFin = new Date(now);
 
-    if (dto.plan === PlanAbonnementEnum.PREMIUM_MENSUEL) {
-      dateFin.setDate(dateFin.getDate() + 30);
-    } else if (dto.plan === PlanAbonnementEnum.PREMIUM_ANNUEL) {
-      dateFin.setDate(dateFin.getDate() + 365);
+    // Vérifier si l'utilisatrice possède déjà un abonnement actif en cours
+    const currentActive = await this.abonnementRepository.findOne({
+      where: [
+        { utilisateurId: userId, statut: StatutAbonnementEnum.ACTIF },
+        { utilisateurId: userId, statut: StatutAbonnementEnum.ESSAI },
+      ],
+      order: { dateFin: 'DESC' },
+    });
+
+    // Prolongation intelligente : si l'abonnement en cours est encore valide, la nouvelle période
+    // s'additionne à sa date de fin existante pour ne perdre aucun jour déjà payé.
+    let baseStartDate = now;
+    if (currentActive && currentActive.dateFin && currentActive.dateFin > now) {
+      baseStartDate = new Date(currentActive.dateFin);
+      this.logger.log(
+        `Prolongation d'abonnement pour l'utilisatrice ${userId} à partir du ${baseStartDate.toISOString()}`,
+      );
     }
+
+    const durationDays = dto.plan === PlanAbonnementEnum.PREMIUM_ANNUEL ? 365 : 30;
+    const dateFin = new Date(baseStartDate);
+    dateFin.setDate(dateFin.getDate() + durationDays);
 
     // Clôture des anciens abonnements actifs
     await this.abonnementRepository.update(
@@ -284,8 +303,9 @@ export class SubscriptionsService {
       },
     );
 
-    const montant = dto.montant ?? (dto.plan === PlanAbonnementEnum.PREMIUM_MENSUEL ? 1000 : 10000);
-    const devise = dto.devise ?? 'XOF';
+    // Règle Zero Trust : prix défini exclusivement par le serveur selon le plan
+    const montant = dto.plan === PlanAbonnementEnum.PREMIUM_ANNUEL ? 10000 : 1000;
+    const devise = 'XOF';
 
     const nouvelAbonnement = this.abonnementRepository.create({
       utilisateurId: userId,
@@ -636,7 +656,7 @@ export class SubscriptionsService {
       };
     }
 
-    // 2. Vérification serveur-à-serveur auprès de FedaPay
+    // 2. Vérification serveur-à-serveur auprès de l'API officielle FedaPay
     const verification = await this.fedapayService.verifyTransaction(transactionId);
 
     if (!verification.approved) {
@@ -652,11 +672,19 @@ export class SubscriptionsService {
 
     // 3. Vérifier l'appartenance de la transaction si les métadonnées contiennent userId
     const metadata = verification.raw?.custom_metadata;
-    if (metadata?.userId && metadata.userId !== userId) {
+    const txUserId = verification.userId || metadata?.userId;
+    if (txUserId && txUserId !== userId) {
       throw new ForbiddenException('Cette transaction FedaPay ne correspond pas à votre compte.');
     }
 
-    // 4. Récupérer le plan à partir des métadonnées et valider le montant réellement encaissé
+    // 4. Valider la devise (XOF obligatoire)
+    if (verification.currency && verification.currency !== 'XOF') {
+      throw new BadRequestException(
+        `Devise invalide (${verification.currency}). Seul le XOF est accepté.`,
+      );
+    }
+
+    // 5. Récupérer le plan à partir des métadonnées et valider le montant réellement encaissé
     let plan = requestedPlan || PlanAbonnementEnum.PREMIUM_MENSUEL;
     if (
       metadata?.plan &&
@@ -664,6 +692,8 @@ export class SubscriptionsService {
         metadata.plan === PlanAbonnementEnum.PREMIUM_ANNUEL)
     ) {
       plan = metadata.plan;
+    } else if (verification.plan) {
+      plan = verification.plan;
     } else if (verification.amount && Number(verification.amount) >= 10000) {
       plan = PlanAbonnementEnum.PREMIUM_ANNUEL;
     }
@@ -678,12 +708,12 @@ export class SubscriptionsService {
       );
     }
 
-    // 5. Activation de l'abonnement
+    // 6. Activation de l'abonnement
     const abonnement = await this.activatePaidSubscription(userId, {
       plan,
       referenceTransaction: transactionId,
       fournisseur: 'fedapay',
-      montant: Number(verification.amount) || expectedAmount,
+      montant: expectedAmount,
       devise: 'XOF',
     });
 
@@ -696,9 +726,23 @@ export class SubscriptionsService {
   }
 
   /**
-   * Traitement du Webhook FedaPay
+   * Traitement sécurisé du Webhook FedaPay :
+   * 1. Validation de la signature cryptographique HMAC-SHA256
+   * 2. Idempotence absolue
+   * 3. Re-requête serveur-à-serveur auprès de l'API FedaPay
+   * 4. Contrôle du montant et de la devise XOF
+   * 5. Activation de l'accès Premium
    */
-  async handleFedaPayWebhook(payload: any) {
+  async handleFedaPayWebhook(payload: any, signatureHeader?: string) {
+    this.logger.log(`Webhook FedaPay reçu : ${JSON.stringify(payload?.name || payload?.event || 'event')}`);
+
+    // 1. Vérification de la signature cryptographique du webhook
+    const isSignatureValid = this.fedapayService.verifyWebhookSignature(payload, signatureHeader);
+    if (!isSignatureValid) {
+      this.logger.error('Signature cryptographique du webhook FedaPay invalide. Rejet de la notification.');
+      throw new UnauthorizedException('Signature webhook FedaPay invalide.');
+    }
+
     const event = payload?.name || payload?.event;
     const entity =
       payload?.entity ||
@@ -706,39 +750,109 @@ export class SubscriptionsService {
       payload?.v1?.entity ||
       payload;
 
-    if (event === 'transaction.approved' || entity?.status === 'approved') {
-      const transactionId = String(entity?.id || '');
-      const userId = entity?.custom_metadata?.userId;
-      const plan = entity?.custom_metadata?.plan || PlanAbonnementEnum.PREMIUM_MENSUEL;
-
-      if (transactionId && userId) {
-        const existingTx = await this.abonnementRepository.findOne({
-          where: { referenceTransaction: transactionId },
-        });
-        if (existingTx) {
-          return { received: true, alreadyProcessed: true };
-        }
-
-        // Double vérification serveur-à-serveur auprès de l'API FedaPay
-        const verification = await this.fedapayService.verifyTransaction(transactionId);
-        const expectedAmount = plan === PlanAbonnementEnum.PREMIUM_ANNUEL ? 10000 : 1000;
-        const paidAmount = Number(verification.amount || 0);
-
-        if (
-          verification.approved &&
-          (verification.amount === undefined || paidAmount >= expectedAmount)
-        ) {
-          await this.activatePaidSubscription(userId, {
-            plan,
-            referenceTransaction: transactionId,
-            fournisseur: 'fedapay',
-            montant: paidAmount || expectedAmount,
-            devise: 'XOF',
-          });
-        }
-      }
+    const transactionId = String(entity?.id || '');
+    if (!transactionId) {
+      this.logger.warn('Webhook FedaPay reçu sans identifiant de transaction valide.');
+      return { received: true, ignored: true };
     }
 
-    return { received: true };
+    const status = (entity?.status || '').toLowerCase();
+    this.logger.log(
+      `Statut webhook transaction ${transactionId} : event=${event}, status=${status}`,
+    );
+
+    if (event === 'transaction.approved' || status === 'approved') {
+      // 2. Idempotence : vérifier si cette transaction a déjà été traitée
+      const existingTx = await this.abonnementRepository.findOne({
+        where: { referenceTransaction: transactionId },
+      });
+      if (existingTx) {
+        this.logger.log(`Transaction ${transactionId} déjà traitée (abonnement actif).`);
+        return { received: true, alreadyProcessed: true };
+      }
+
+      // 3. Double vérification serveur-à-serveur auprès de l'API FedaPay
+      const verification = await this.fedapayService.verifyTransaction(transactionId);
+      if (!verification.approved) {
+        this.logger.warn(
+          `Transaction ${transactionId} non approuvée selon l'API FedaPay (statut=${verification.status}).`,
+        );
+        return { received: true, status: verification.status };
+      }
+
+      // 4. Contrôle de la devise
+      if (verification.currency && verification.currency !== 'XOF') {
+        this.logger.error(
+          `Transaction ${transactionId} rejetée : devise ${verification.currency} au lieu de XOF.`,
+        );
+        return { received: true, error: 'invalid_currency' };
+      }
+
+      // 5. Identification de l'utilisatrice
+      const userId = verification.userId || entity?.custom_metadata?.userId;
+      if (!userId) {
+        this.logger.error(
+          `Transaction ${transactionId} reçue sans userId dans les métadonnées.`,
+        );
+        return { received: true, error: 'missing_user_id' };
+      }
+
+      const user = await this.utilisateurRepository.findOne({ where: { id: userId } });
+      if (!user) {
+        this.logger.error(
+          `Utilisatrice ${userId} introuvable pour la transaction ${transactionId}.`,
+        );
+        return { received: true, error: 'user_not_found' };
+      }
+
+      // 6. Détermination du plan et contrôle du montant
+      let plan =
+        verification.plan ||
+        entity?.custom_metadata?.plan ||
+        PlanAbonnementEnum.PREMIUM_MENSUEL;
+      if (
+        plan !== PlanAbonnementEnum.PREMIUM_ANNUEL &&
+        plan !== PlanAbonnementEnum.PREMIUM_MENSUEL
+      ) {
+        plan =
+          Number(verification.amount) >= 10000
+            ? PlanAbonnementEnum.PREMIUM_ANNUEL
+            : PlanAbonnementEnum.PREMIUM_MENSUEL;
+      }
+
+      const expectedAmount = plan === PlanAbonnementEnum.PREMIUM_ANNUEL ? 10000 : 1000;
+      const paidAmount = Number(verification.amount || 0);
+
+      if (verification.amount !== undefined && paidAmount < expectedAmount) {
+        this.logger.error(
+          `Montant insuffisant reçu pour la transaction ${transactionId} : ${paidAmount} < ${expectedAmount} XOF.`,
+        );
+        return { received: true, error: 'insufficient_amount' };
+      }
+
+      // 7. Activation de l'abonnement
+      await this.activatePaidSubscription(userId, {
+        plan,
+        referenceTransaction: transactionId,
+        fournisseur: 'fedapay',
+        montant: expectedAmount,
+        devise: 'XOF',
+      });
+
+      this.logger.log(
+        `Abonnement ${plan} activé avec succès via webhook pour l'utilisatrice ${userId}.`,
+      );
+      return { received: true, activated: true };
+    } else if (
+      event === 'transaction.canceled' ||
+      status === 'canceled' ||
+      event === 'transaction.declined' ||
+      status === 'declined'
+    ) {
+      this.logger.warn(`Transaction FedaPay ${transactionId} refusée ou annulée (statut=${status}).`);
+      return { received: true, status };
+    }
+
+    return { received: true, status };
   }
 }

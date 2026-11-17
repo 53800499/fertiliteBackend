@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Patch,
@@ -30,6 +31,11 @@ export class AdminPromotionsController {
   @Patch(':id/toggle')
   togglePromo(@Param('id') id: string, @Body('actif') actif: boolean, @Req() req: any) {
     return this.promotionsService.togglePromo(id, actif, extractAdminActor(req));
+  }
+
+  @Delete(':id')
+  deletePromo(@Param('id') id: string, @Req() req: any) {
+    return this.promotionsService.deletePromo(id, extractAdminActor(req));
   }
 }
 

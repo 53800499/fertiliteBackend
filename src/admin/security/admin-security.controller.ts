@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { SuperAdminGuard } from '../../subscriptions/guards/super-admin.guard';
 import { RoleUtilisateurEnum } from '../../users/entities/utilisateur.entity';
 import { extractAdminActor } from '../shared/admin-actor.helper';
@@ -22,6 +22,11 @@ export class AdminSecurityController {
     return this.securityService.createOrPromoteAdmin(body, extractAdminActor(req));
   }
 
+  @Delete('admins/:id')
+  demoteAdmin(@Param('id') id: string, @Req() req: any) {
+    return this.securityService.demoteAdmin(id, extractAdminActor(req));
+  }
+
   @Get('audit-logs')
   getAuditLogs(@Query('module') moduleFilter?: string) {
     return this.securityService.getAuditLogs(moduleFilter);
@@ -30,6 +35,11 @@ export class AdminSecurityController {
   @Get('privacy/governance')
   getConsentGovernance() {
     return this.securityService.getConsentGovernance();
+  }
+
+  @Delete('privacy/purge/:id')
+  purgeGdprUser(@Param('id') id: string, @Req() req: any) {
+    return this.securityService.purgeGdprUser(id, extractAdminActor(req));
   }
 }
 

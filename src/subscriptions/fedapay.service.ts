@@ -1,5 +1,12 @@
-import { Injectable, Logger, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  BadRequestException,
+  UnauthorizedException,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import * as crypto from 'crypto';
 import { PlanAbonnementEnum } from './entities/abonnement.entity';
 import { Utilisateur } from '../users/entities/utilisateur.entity';
 
@@ -19,6 +26,9 @@ export interface FedaPayVerificationResult {
   transactionId: string;
   status: string;
   amount?: number;
+  currency?: string;
+  userId?: string;
+  plan?: PlanAbonnementEnum;
   raw?: any;
 }
 
@@ -35,6 +45,13 @@ export class FedaPayService {
     );
   }
 
+  private get webhookSecret(): string | undefined {
+    return (
+      this.configService.get<string>('FEDAPAY_WEBHOOK_SECRET') ||
+      process.env.FEDAPAY_WEBHOOK_SECRET
+    );
+  }
+
   private get environment(): 'sandbox' | 'live' {
     const env = (
       this.configService.get<string>('FEDAPAY_ENVIRONMENT') ||
@@ -42,6 +59,27 @@ export class FedaPayService {
       'sandbox'
     ).toLowerCase();
     return env === 'live' ? 'live' : 'sandbox';
+  }
+
+  private get isSimulationAllowed(): boolean {
+    const nodeEnv = (
+      this.configService.get<string>('NODE_ENV') ||
+      process.env.NODE_ENV ||
+      'development'
+    ).toLowerCase();
+
+    // Règle d'or : strictement interdit en production ou avec FedaPay en mode LIVE
+    if (nodeEnv === 'production' || this.isLiveEnvironment()) {
+      return false;
+    }
+
+    const simFlag = (
+      this.configService.get<string>('PAYMENT_SIMULATION_ENABLED') ||
+      process.env.PAYMENT_SIMULATION_ENABLED ||
+      'false'
+    ).toLowerCase();
+
+    return simFlag === 'true' || simFlag === '1';
   }
 
   private get apiBaseUrl(): string {
@@ -68,8 +106,72 @@ export class FedaPayService {
   }
 
   /**
+   * Vérifie la signature cryptographique du webhook FedaPay (HMAC-SHA256).
+   * Protège contre les fausses notifications de paiement injectées par un tiers.
+   */
+  public verifyWebhookSignature(
+    rawPayload: any,
+    signatureHeader?: string,
+  ): boolean {
+    const secret = this.webhookSecret;
+
+    // Si aucune clé secrète de webhook n'est configurée dans l'environnement
+    if (!secret || secret.trim().length === 0) {
+      if (this.isLiveEnvironment()) {
+        this.logger.error(
+          'FEDAPAY_WEBHOOK_SECRET non configuré en environnement LIVE. Rejet de sécurité par précaution.',
+        );
+        return false;
+      }
+      this.logger.warn(
+        'FEDAPAY_WEBHOOK_SECRET non configuré. Re-vérification obligatoire auprès de l\'API FedaPay.',
+      );
+      return true; // En mode sandbox/dev local, on s'appuie sur la re-vérification API FedaPay
+    }
+
+    if (!signatureHeader || signatureHeader.trim().length === 0) {
+      this.logger.warn('Webhook FedaPay reçu sans signature X-FEDAPAY-SIGNATURE.');
+      return false;
+    }
+
+    try {
+      // Format typique FedaPay : "t=timestamp,s=signature" ou directement la signature hex
+      let expectedSig = signatureHeader.trim();
+      if (signatureHeader.includes('s=')) {
+        const parts = signatureHeader.split(',');
+        for (const p of parts) {
+          const [k, v] = p.trim().split('=');
+          if (k === 's' && v) {
+            expectedSig = v.trim();
+          }
+        }
+      }
+
+      const payloadStr =
+        typeof rawPayload === 'string' ? rawPayload : JSON.stringify(rawPayload);
+      const computedHash = crypto
+        .createHmac('sha256', secret)
+        .update(payloadStr)
+        .digest('hex');
+
+      const isMatch =
+        computedHash.toLowerCase() === expectedSig.toLowerCase();
+
+      if (!isMatch) {
+        this.logger.warn(
+          `Signature Webhook invalide. Attendu: ${computedHash.substring(0, 10)}..., Reçu: ${expectedSig.substring(0, 10)}...`,
+        );
+      }
+      return isMatch;
+    } catch (err: any) {
+      this.logger.error(`Exception lors de la vérification de la signature du webhook: ${err.message}`);
+      return false;
+    }
+  }
+
+  /**
    * Initialise une transaction de paiement FedaPay (MTN MoMo, Moov Money, Celtiis Cash, Carte).
-   * Si les clés FedaPay ne sont pas configurées, génère une simulation élégante pour les tests.
+   * Le prix est déterminé côté serveur.
    */
   async initiatePayment(
     user: Utilisateur,
@@ -91,13 +193,23 @@ export class FedaPayService {
         this.logger.error(
           'Tentative de paiement en mode LIVE sans clé secrète FedaPay configurée (FEDAPAY_SECRET_KEY).',
         );
-        throw new BadRequestException(
-          'Passerelle de paiement FedaPay Live non configurée sur le serveur.',
+        throw new ServiceUnavailableException(
+          'Passerelle de paiement FedaPay Live non configurée sur le serveur. Veuillez contacter l\'administrateur.',
+        );
+      }
+
+      // En mode hors production, vérifier si la simulation est explicitement autorisée
+      if (!this.isSimulationAllowed) {
+        this.logger.error(
+          'Clés FedaPay non configurées et PAYMENT_SIMULATION_ENABLED n\'est pas activé.',
+        );
+        throw new ServiceUnavailableException(
+          'Passerelle de paiement indisponible (clés FedaPay absentes et simulation désactivée).',
         );
       }
 
       this.logger.warn(
-        `Clés FedaPay non configurées (FEDAPAY_SECRET_KEY). Mode simulation sandbox activé pour l'utilisatrice ${user.id}.`,
+        `Mode simulation sandbox explicitement autorisé (PAYMENT_SIMULATION_ENABLED=true) pour l'utilisatrice ${user.id}.`,
       );
 
       const simPrefix = plan === PlanAbonnementEnum.PREMIUM_ANNUEL ? 'FEDASIM-ANN' : 'FEDASIM-MEN';
@@ -111,7 +223,7 @@ export class FedaPayService {
         plan,
         mode: 'simulation',
         message:
-          'Mode Simulation FedaPay actif (ajoutez FEDAPAY_SECRET_KEY dans .env pour passer en environnement réel).',
+          'Mode Simulation FedaPay actif (ajoutez FEDAPAY_SECRET_KEY pour passer aux tests réels).',
       };
     }
 
@@ -226,16 +338,16 @@ export class FedaPayService {
   }
 
   /**
-   * Vérifie le statut d'une transaction FedaPay auprès de l'API.
-   * En environnement LIVE, les références simulées (FEDASIM-) sont strictement rejetées.
+   * Vérifie le statut d'une transaction FedaPay directement auprès de l'API officielle FedaPay.
+   * Valide le statut exact, le montant, la devise et les métadonnées.
    */
   async verifyTransaction(transactionId: string): Promise<FedaPayVerificationResult> {
     const isSimulatedId = transactionId.startsWith('FEDASIM-');
 
     if (isSimulatedId) {
-      if (this.isLiveEnvironment()) {
+      if (!this.isSimulationAllowed) {
         this.logger.warn(
-          `Rejet de la transaction simulée ${transactionId} en environnement LIVE.`,
+          `Rejet strict de la transaction simulée ${transactionId} (simulation non autorisée).`,
         );
         return {
           approved: false,
@@ -245,18 +357,24 @@ export class FedaPayService {
       }
 
       const simAmount = transactionId.startsWith('FEDASIM-ANN-') ? 10000 : 1000;
+      const simPlan = transactionId.startsWith('FEDASIM-ANN-')
+        ? PlanAbonnementEnum.PREMIUM_ANNUEL
+        : PlanAbonnementEnum.PREMIUM_MENSUEL;
+
       return {
         approved: true,
         transactionId,
         status: 'approved',
         amount: simAmount,
+        currency: 'XOF',
+        plan: simPlan,
       };
     }
 
     if (!this.isConfigured()) {
-      if (this.isLiveEnvironment()) {
+      if (!this.isSimulationAllowed) {
         this.logger.error(
-          'Impossible de vérifier la transaction : FEDAPAY_SECRET_KEY manquante en mode LIVE.',
+          'Impossible de vérifier la transaction : passerelle FedaPay non configurée.',
         );
         return {
           approved: false,
@@ -271,6 +389,7 @@ export class FedaPayService {
         transactionId,
         status: 'approved',
         amount: simAmount,
+        currency: 'XOF',
       };
     }
 
@@ -297,12 +416,19 @@ export class FedaPayService {
       const transaction =
         data['v1/transaction'] || data.v1?.transaction || data.transaction || data;
       const status = (transaction.status || '').toLowerCase();
+      const rawCurrency =
+        typeof transaction.currency === 'object'
+          ? transaction.currency?.iso
+          : transaction.currency;
 
       return {
         approved: status === 'approved',
         transactionId,
         status,
-        amount: transaction.amount,
+        amount: Number(transaction.amount),
+        currency: (rawCurrency || 'XOF').toUpperCase(),
+        userId: transaction.custom_metadata?.userId,
+        plan: transaction.custom_metadata?.plan,
         raw: transaction,
       };
     } catch (error: any) {
@@ -315,3 +441,4 @@ export class FedaPayService {
     }
   }
 }
+

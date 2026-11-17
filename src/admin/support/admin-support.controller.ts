@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Patch,
@@ -36,6 +37,11 @@ export class AdminSupportController {
   @Post(':id/reply')
   replyTicket(@Param('id') id: string, @Body('contenu') contenu: string, @Req() req: any) {
     return this.supportService.replyTicket(id, contenu, extractAdminActor(req));
+  }
+
+  @Delete(':id')
+  deleteTicket(@Param('id') id: string, @Req() req: any) {
+    return this.supportService.deleteTicket(id, extractAdminActor(req));
   }
 }
 
