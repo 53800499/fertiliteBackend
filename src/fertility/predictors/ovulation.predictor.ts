@@ -18,14 +18,15 @@ export class OvulationPredictor {
     historyCount: number,
     irregularDeclared = false,
   ): OvulationPredictionResult {
-    const start = new Date(cycleStartDate);
+    const cleanDate = cycleStartDate.split('T')[0];
+    const start = new Date(`${cleanDate}T00:00:00.000Z`);
     
     // Règle biologique : Ovulation = Date début + (Durée référence - 14 jours)
     const lutealPhaseDays = 14;
     const ovulationDayOffset = Math.max(1, referenceCycleDuration - lutealPhaseDays);
 
     const ovulationDate = new Date(start);
-    ovulationDate.setDate(ovulationDate.getDate() + ovulationDayOffset);
+    ovulationDate.setUTCDate(ovulationDate.getUTCDate() + ovulationDayOffset);
     const estimatedOvulationDate = ovulationDate.toISOString().split('T')[0];
 
     // Marge d'incertitude selon régularité statistique

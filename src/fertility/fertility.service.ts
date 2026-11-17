@@ -352,10 +352,12 @@ export class FertilityService {
     year: number,
     month: number,
   ): Promise<CalendarMonthResponseDto> {
-    const startDate = new Date(year, month - 1, 1).toISOString().split('T')[0];
-    const endDate = new Date(year, month, 0).toISOString().split('T')[0];
+    const monthPad = String(month).padStart(2, '0');
+    const daysCount = new Date(year, month, 0).getDate();
+    const startDate = `${year}-${monthPad}-01`;
+    const endDate = `${year}-${monthPad}-${String(daysCount).padStart(2, '0')}`;
 
-    const [activeCycle, currentPrediction, joursRegles] = await Promise.all([
+    const [activeCycle, currentPrediction, joursRegles, profil] = await Promise.all([
       this.cycleRepo.findOne({
         where: { utilisateurId: userId, statut: StatutCycleEnum.EN_COURS },
       }),
@@ -366,32 +368,67 @@ export class FertilityService {
         .where('c.utilisateurId = :userId', { userId })
         .andWhere('jr.date BETWEEN :startDate AND :endDate', { startDate, endDate })
         .getMany(),
+      this.profilRepo.findOne({ where: { utilisateurId: userId } }),
     ]);
 
     const joursMap = new Map<string, JourRegles>();
     joursRegles.forEach((jr) => joursMap.set(jr.date, jr));
 
-    const fertileStart = currentPrediction.fertileWindow.startDate;
-    const fertileEnd = currentPrediction.fertileWindow.endDate;
-    const ovulationDate = currentPrediction.estimatedOvulationDate;
+    const cycleDuration = profil?.dureeCycleHabituelleJours || 28;
+    const periodDuration = profil?.dureeReglesHabituelleJours || 5;
+    const isIrregular = profil?.irregulariteDeclaree || false;
+    const baseCycleStart = activeCycle?.dateDebut || profil?.dateDernieresReglesConnues;
 
-    const daysCount = new Date(year, month, 0).getDate();
     const days: CalendarDaySummaryDto[] = [];
 
     for (let day = 1; day <= daysCount; day++) {
-      const dayDate = new Date(year, month - 1, day);
-      const dateStr = dayDate.toISOString().split('T')[0];
-
+      const dateStr = `${year}-${monthPad}-${String(day).padStart(2, '0')}`;
       const jour = joursMap.get(dateStr);
-      const isPeriodDay = !!jour && jour.intensiteFlux !== ('absent' as any);
-      const isFertileDay =
-        !!fertileStart && !!fertileEnd && dateStr >= fertileStart && dateStr <= fertileEnd;
-      const isOvulationDay = !!ovulationDate && dateStr === ovulationDate;
+      const isPeriodRecorded = !!jour && jour.intensiteFlux !== ('absent' as any);
+
+      // 1. Calcul si ce jour correspond à la prédiction active en cours
+      const curFertileStart = currentPrediction?.fertileWindow?.startDate;
+      const curFertileEnd = currentPrediction?.fertileWindow?.endDate;
+      const curOvuDate = currentPrediction?.estimatedOvulationDate;
+
+      let isFertileDay = false;
+      let isOvulationDay = false;
+      let isPredictedPeriod = false;
+
+      if (curFertileStart && curFertileEnd && dateStr >= curFertileStart && dateStr <= curFertileEnd) {
+        isFertileDay = true;
+        isOvulationDay = !!curOvuDate && dateStr === curOvuDate;
+      } else if (baseCycleStart) {
+        // Projection multi-cycles pour les mois passés ou futurs
+        const targetMs = Date.UTC(year, month - 1, day);
+        const [sy, sm, sd] = baseCycleStart.split('-').map(Number);
+        const originMs = Date.UTC(sy, sm - 1, sd);
+        const diffDays = Math.floor((targetMs - originMs) / (1000 * 60 * 60 * 24));
+
+        // Index du jour dans le cycle (1 à cycleDuration)
+        const cycleDay = (((diffDays % cycleDuration) + cycleDuration) % cycleDuration) + 1;
+        const theoreticalOvulation = Math.max(1, cycleDuration - 14);
+        const marginBefore = isIrregular ? 6 : 5;
+        const marginAfter = isIrregular ? 2 : 1;
+
+        if (cycleDay === theoreticalOvulation) {
+          isOvulationDay = true;
+          isFertileDay = true;
+        } else if (cycleDay >= theoreticalOvulation - marginBefore && cycleDay <= theoreticalOvulation + marginAfter) {
+          isFertileDay = true;
+        }
+
+        if (cycleDay >= 1 && cycleDay <= periodDuration) {
+          isPredictedPeriod = true;
+        }
+      }
+
+      const isPeriodDay = isPeriodRecorded || isPredictedPeriod;
 
       days.push({
         date: dateStr,
         isPeriodDay,
-        flowIntensity: jour?.intensiteFlux || null,
+        flowIntensity: jour?.intensiteFlux || (isPredictedPeriod ? 'moyen' : null),
         painLevel: jour?.douleurNiveau ?? null,
         isFertileDay,
         isOvulationDay,
@@ -404,13 +441,19 @@ export class FertilityService {
       });
     }
 
+    // Fenêtre fertile du mois demandé
+    const monthOvulation = days.find((d) => d.isOvulationDay)?.date || currentPrediction?.estimatedOvulationDate;
+    const fertileDays = days.filter((d) => d.isFertileDay);
+    const monthFertileStart = fertileDays.length > 0 ? fertileDays[0].date : currentPrediction?.fertileWindow?.startDate;
+    const monthFertileEnd = fertileDays.length > 0 ? fertileDays[fertileDays.length - 1].date : currentPrediction?.fertileWindow?.endDate;
+
     return {
       year,
       month,
       activeCycleId: activeCycle?.id || null,
-      estimatedOvulationDate: ovulationDate,
-      fertileWindowStartDate: fertileStart,
-      fertileWindowEndDate: fertileEnd,
+      estimatedOvulationDate: monthOvulation || null,
+      fertileWindowStartDate: monthFertileStart || null,
+      fertileWindowEndDate: monthFertileEnd || null,
       days,
     };
   }

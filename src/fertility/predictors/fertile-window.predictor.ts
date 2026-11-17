@@ -22,15 +22,16 @@ export class FertileWindowPredictor {
     estimatedOvulationDate: string,
     uncertaintyMarginDays: number,
   ): FertileWindowResult {
-    const ovuDate = new Date(estimatedOvulationDate);
+    const cleanOvu = estimatedOvulationDate.split('T')[0];
+    const ovuDate = new Date(`${cleanOvu}T00:00:00.000Z`);
 
     // Début : 5 jours de viabilité des spermatozoïdes + marge incertitude
     const startDate = new Date(ovuDate);
-    startDate.setDate(startDate.getDate() - 5 - uncertaintyMarginDays);
+    startDate.setUTCDate(startDate.getUTCDate() - 5 - uncertaintyMarginDays);
 
     // Fin : 24h de viabilité de l'ovocyte + marge incertitude
     const endDate = new Date(ovuDate);
-    endDate.setDate(endDate.getDate() + 1 + uncertaintyMarginDays);
+    endDate.setUTCDate(endDate.getUTCDate() + 1 + uncertaintyMarginDays);
 
     return {
       startDate: startDate.toISOString().split('T')[0],
@@ -46,8 +47,10 @@ export class FertileWindowPredictor {
     estimatedOvulationDateStr: string,
     bonusScore = 0,
   ): DailyFertilityScore {
-    const targetDate = new Date(targetDateStr);
-    const ovuDate = new Date(estimatedOvulationDateStr);
+    const cleanTarget = targetDateStr.split('T')[0];
+    const cleanOvu = estimatedOvulationDateStr.split('T')[0];
+    const targetDate = new Date(`${cleanTarget}T00:00:00.000Z`);
+    const ovuDate = new Date(`${cleanOvu}T00:00:00.000Z`);
 
     const diffTime = targetDate.getTime() - ovuDate.getTime();
     const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24)); // t - J_ovu
