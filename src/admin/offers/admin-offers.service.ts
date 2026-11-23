@@ -88,7 +88,9 @@ export class AdminOffersService {
     if (!dto.code?.trim() || !dto.nom?.trim()) {
       throw new BadRequestException("Le code et le nom de l'offre sont requis.");
     }
-    const existing = await this.offerRepo.findOne({ where: { code: dto.code.trim() } });
+    const existing = dto.id
+      ? await this.offerRepo.findOne({ where: { id: dto.id } })
+      : await this.offerRepo.findOne({ where: { code: dto.code.trim() } });
     const entity = existing
       ? Object.assign(existing, dto)
       : this.offerRepo.create({
