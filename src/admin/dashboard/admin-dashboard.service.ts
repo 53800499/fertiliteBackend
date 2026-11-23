@@ -19,10 +19,10 @@ import { EditorialContent } from '../../super-admin/entities/editorial-content.e
 import { SupportTicket } from '../../super-admin/entities/support-ticket.entity';
 
 const PERIOD_DAYS_MAP: Record<string, number> = {
-  '7d': 7,
-  '30d': 30,
-  '90d': 90,
-  '365d': 365,
+  '7j': 7,
+  '30j': 30,
+  '90j': 90,
+  '365j': 365,
 };
 
 @Injectable()
@@ -54,7 +54,7 @@ export class AdminDashboardService {
     return new Date(Date.now() - days * 86400000);
   }
 
-  async getDashboard(period = '30d') {
+  async getDashboard(period = '30j') {
     const now = new Date();
     const dayAgo = new Date(now.getTime() - 86400000);
     const weekAgo = new Date(now.getTime() - 7 * 86400000);
@@ -141,13 +141,16 @@ export class AdminDashboardService {
       });
     }
 
-    const geoDistribution = [
-      { departement: 'Littoral (Cotonou)', pourcentage: 44, utilisatrices: Math.round(totalUsers * 0.44) },
-      { departement: 'Atlantique (Abomey-Calavi)', pourcentage: 26, utilisatrices: Math.round(totalUsers * 0.26) },
-      { departement: 'Ouémé (Porto-Novo)', pourcentage: 14, utilisatrices: Math.round(totalUsers * 0.14) },
-      { departement: 'Borgou (Parakou)', pourcentage: 9, utilisatrices: Math.round(totalUsers * 0.09) },
-      { departement: 'Autres départements', pourcentage: 7, utilisatrices: Math.max(0, totalUsers - Math.round(totalUsers * 0.93)) },
-    ];
+    const geoDistribution =
+      totalUsers > 0
+        ? [
+            { departement: 'Littoral (Cotonou)', pourcentage: 44, utilisatrices: Math.round(totalUsers * 0.44) },
+            { departement: 'Atlantique (Abomey-Calavi)', pourcentage: 26, utilisatrices: Math.round(totalUsers * 0.26) },
+            { departement: 'Ouémé (Porto-Novo)', pourcentage: 14, utilisatrices: Math.round(totalUsers * 0.14) },
+            { departement: 'Borgou (Parakou)', pourcentage: 9, utilisatrices: Math.round(totalUsers * 0.09) },
+            { departement: 'Autres départements', pourcentage: 7, utilisatrices: Math.max(0, totalUsers - Math.round(totalUsers * 0.93)) },
+          ]
+        : [];
 
     const featureUsage = [
       { module: 'Suivi du cycle', volume: totalCycles },
@@ -166,7 +169,7 @@ export class AdminDashboardService {
         newRegistrations,
         fertilityUsersCount,
         totalCycles,
-        consultationsCount: totalPros * 4,
+        consultationsCount: totalPros,
         activeSubscriptions: activePremiumSubs.length,
         totalRevenue,
         currency: 'XOF',

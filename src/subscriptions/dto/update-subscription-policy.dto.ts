@@ -13,5 +13,11 @@ export class UpdateSubscriptionPolicyDto {
   @IsString()
   @MaxLength(500)
   messageRecommandation?: string;
+
+  @IsOptional()
+  modifiePar?: any;
+
+  @IsOptional()
+  dateMaj?: any;
 }
 
