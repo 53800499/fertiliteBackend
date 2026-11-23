@@ -53,8 +53,8 @@ export class ProfilUtilisateur {
   })
   dureeReglesHabituelleJours: number | null;
 
-  @Column({ name: 'irregularite_declaree', type: 'boolean', default: false })
-  irregulariteDeclaree: boolean;
+  @Column({ name: 'irregularite_declaree', type: 'boolean', nullable: true, default: null })
+  irregulariteDeclaree: boolean | null;
 
   @Column({ name: 'date_dernieres_regles_connues', type: 'date', nullable: true })
   dateDernieresReglesConnues: string | null;

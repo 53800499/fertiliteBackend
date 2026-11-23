@@ -1,4 +1,4 @@
-import { IsEmail, IsNotEmpty, IsString, MinLength } from 'class-validator';
+import { IsEmail, IsNotEmpty, IsOptional, IsString, MinLength } from 'class-validator';
 
 export class ForgotPasswordDto {
   @IsEmail({}, { message: 'Adresse email invalide' })
@@ -6,9 +6,16 @@ export class ForgotPasswordDto {
 }
 
 export class ResetPasswordDto {
+  @IsEmail({}, { message: 'Adresse email requise' })
+  email: string;
+
+  @IsOptional()
   @IsString()
-  @IsNotEmpty({ message: 'Le jeton de réinitialisation est obligatoire' })
-  resetToken: string;
+  code?: string;
+
+  @IsOptional()
+  @IsString()
+  resetToken?: string;
 
   @IsString()
   @MinLength(8, { message: 'Le nouveau mot de passe doit contenir au moins 8 caractères' })

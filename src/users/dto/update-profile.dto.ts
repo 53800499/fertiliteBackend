@@ -40,8 +40,7 @@ export class UpdateProfileDto {
   dureeMoyenneRegles?: number;
 
   @IsOptional()
-  @IsBoolean()
-  irregulariteDeclaree?: boolean;
+  irregulariteDeclaree?: boolean | null;
 
   @IsOptional()
   @IsISO8601({}, { message: 'La date des dernières règles doit être au format ISO 8601 (YYYY-MM-DD)' })

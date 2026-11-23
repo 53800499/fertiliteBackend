@@ -124,6 +124,20 @@ export class DatabaseModule implements OnModuleInit {
         ADD COLUMN IF NOT EXISTS "role" "public"."utilisateur_role_enum" NOT NULL DEFAULT 'utilisatrice';
       `);
       await this.dataSource.query(`
+        ALTER TABLE "session_authentification"
+        ADD COLUMN IF NOT EXISTS "date_premiere_connexion" TIMESTAMP WITH TIME ZONE DEFAULT now();
+      `);
+      await this.dataSource.query(`
+        UPDATE "session_authentification"
+        SET "date_premiere_connexion" = "date_derniere_utilisation"
+        WHERE "date_premiere_connexion" IS NULL;
+      `);
+      await this.dataSource.query(`
+        UPDATE "session_authentification"
+        SET "revoque" = false
+        WHERE "date_expiration" > now();
+      `);
+      await this.dataSource.query(`
         CREATE TABLE IF NOT EXISTS "abonnement_politique" (
           "id" character varying(32) NOT NULL DEFAULT 'global',
           "exigence_abonnement_initiale" boolean NOT NULL DEFAULT false,
@@ -203,6 +217,10 @@ export class DatabaseModule implements OnModuleInit {
           "date_maj" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
           CONSTRAINT "PK_contenu_editorial_id" PRIMARY KEY ("id")
         );
+      `);
+      await this.dataSource.query(`
+        ALTER TABLE "utilisateur" ADD COLUMN IF NOT EXISTS "code_reinitialisation" character varying(10);
+        ALTER TABLE "utilisateur" ADD COLUMN IF NOT EXISTS "expiration_reinitialisation" TIMESTAMP WITH TIME ZONE;
       `);
       await this.dataSource.query(`
         CREATE TABLE IF NOT EXISTS "offre_abonnement" (

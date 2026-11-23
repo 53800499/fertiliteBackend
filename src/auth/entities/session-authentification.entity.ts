@@ -45,6 +45,9 @@ export class SessionAuthentification {
   @Column({ name: 'date_expiration', type: 'timestamptz' })
   dateExpiration: Date;
 
+  @Column({ name: 'date_premiere_connexion', type: 'timestamptz', nullable: true })
+  datePremiereConnexion: Date | null;
+
   @CreateDateColumn({ name: 'date_derniere_utilisation', type: 'timestamptz' })
   dateDerniereUtilisation: Date;
 

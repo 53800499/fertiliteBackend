@@ -63,6 +63,12 @@ export class Utilisateur {
   @Column({ name: 'code_parrainage', type: 'varchar', length: 20, nullable: true, unique: true })
   codeParrainage: string | null;
 
+  @Column({ name: 'code_reinitialisation', type: 'varchar', length: 10, nullable: true })
+  codeReinitialisation: string | null;
+
+  @Column({ name: 'expiration_reinitialisation', type: 'timestamptz', nullable: true })
+  expirationReinitialisation: Date | null;
+
   @Column({ name: 'fuseau_horaire', type: 'varchar', length: 50, default: 'Africa/Porto-Novo' })
   fuseauHoraire: string;
 

@@ -29,7 +29,7 @@ import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
         secret: config.get<string>('JWT_SECRET', 'super_secret_jwt_key_default'),
-        signOptions: { expiresIn: '15m' },
+        signOptions: { expiresIn: '30d' },
       }),
     }),
   ],

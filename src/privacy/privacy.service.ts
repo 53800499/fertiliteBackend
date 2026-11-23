@@ -83,10 +83,10 @@ export class PrivacyService {
   }
 
   /**
-   * Liste des sessions actives par appareil
+   * Liste des sessions actives par appareil avec période de connexion (sans doublons)
    */
   async getActiveSessions(userId: string) {
-    return this.sessionRepo.find({
+    const sessions = await this.sessionRepo.find({
       where: { utilisateurId: userId, revoque: false },
       select: {
         id: true,
@@ -94,10 +94,33 @@ export class PrivacyService {
         plateforme: true,
         adresseIp: true,
         dateExpiration: true,
+        datePremiereConnexion: true,
         dateDerniereUtilisation: true,
       },
       order: { dateDerniereUtilisation: 'DESC' },
     });
+
+    // Dédupliquer par appareil pour ne pas surcharger la vue ni la base
+    const deviceMap = new Map<string, (typeof sessions)[0]>();
+    for (const sess of sessions) {
+      const key = `${sess.nomAppareil || 'Appareil'}_${sess.plateforme || 'autre'}`.toLowerCase();
+      if (!deviceMap.has(key)) {
+        deviceMap.set(key, sess);
+      } else {
+        // Nettoyer en tâche de fond la session en double
+        this.sessionRepo.update({ id: sess.id }, { revoque: true }).catch(() => {});
+      }
+    }
+
+    return Array.from(deviceMap.values()).map((s) => ({
+      id: s.id,
+      nomAppareil: s.nomAppareil || 'Appareil mobile',
+      plateforme: s.plateforme,
+      adresseIp: s.adresseIp,
+      datePremiereConnexion: s.datePremiereConnexion || s.dateDerniereUtilisation,
+      dateDerniereUtilisation: s.dateDerniereUtilisation,
+      dateExpiration: s.dateExpiration,
+    }));
   }
 
   /**

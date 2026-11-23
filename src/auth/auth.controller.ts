@@ -42,10 +42,19 @@ export class AuthController {
   }
 
   @Post('logout')
-  @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
-  async logout(@CurrentUser() user: UserPayload, @Body() body: { refreshToken?: string }) {
-    return this.authService.logout(user.userId, body.refreshToken);
+  async logout(@Req() req: Request, @Body() body: { refreshToken?: string }) {
+    let userId: string | undefined;
+    try {
+      const authHeader = req.headers.authorization;
+      if (authHeader && authHeader.startsWith('Bearer ')) {
+        const token = authHeader.substring(7);
+        const decoded = this.authService.decodeToken(token);
+        if (decoded?.sub) userId = decoded.sub;
+      }
+    } catch (_) {}
+
+    return this.authService.logout(userId, body?.refreshToken);
   }
 
   @Post('forgot-password')
@@ -57,10 +66,6 @@ export class AuthController {
   @Post('reset-password')
   @HttpCode(HttpStatus.OK)
   async resetPassword(@Body() dto: ResetPasswordDto) {
-    // Révocation globale des sessions après réinitialisation
-    return {
-      success: true,
-      message: 'Votre mot de passe a été réinitialisé avec succès.',
-    };
+    return this.authService.resetPassword(dto);
   }
 }

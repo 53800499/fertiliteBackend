@@ -10,6 +10,8 @@ import { JourRegles, IntensiteFluxEnum } from './entities/jour-regles.entity';
 import { StartCycleDto } from './dto/start-cycle.dto';
 import { LogFlowDto } from './dto/log-flow.dto';
 import { UpdateCycleDto } from './dto/update-cycle.dto';
+import { CreatePastCycleDto, CreateMultiplePastCyclesDto } from './dto/create-past-cycle.dto';
+import { SourceSaisieEnum } from './entities/cycle.entity';
 import { Optional } from '@nestjs/common';
 import { FertilityService } from '../fertility/fertility.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
@@ -89,6 +91,114 @@ export class CyclesService {
     }
 
     return this.getCycleById(userId, savedCycle.id);
+  }
+
+  /**
+   * Saisir un cycle passé ou historique
+   */
+  async createPastCycle(userId: string, dto: CreatePastCycleDto): Promise<Cycle> {
+    const startDate = new Date(dto.dateDebut.length === 10 ? `${dto.dateDebut}T12:00:00Z` : dto.dateDebut);
+    let cycleDuration = dto.dureeCycleJours;
+    let endDateStr = dto.dateFin;
+
+    if (!endDateStr && cycleDuration) {
+      const calculatedEnd = new Date(startDate);
+      calculatedEnd.setDate(calculatedEnd.getDate() + cycleDuration - 1);
+      endDateStr = calculatedEnd.toISOString().split('T')[0];
+    } else if (endDateStr && !cycleDuration) {
+      const endD = new Date(endDateStr.length === 10 ? `${endDateStr}T12:00:00Z` : endDateStr);
+      const diffTime = Math.abs(endD.getTime() - startDate.getTime());
+      cycleDuration = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
+    }
+
+    const periodDuration = dto.dureeReglesJours || 5;
+
+    // Vérifier si un cycle existe déjà à cette dateDebut
+    let cycle = await this.cycleRepo.findOne({
+      where: { utilisateurId: userId, dateDebut: dto.dateDebut },
+    });
+
+    if (cycle) {
+      cycle.dateFin = endDateStr || cycle.dateFin;
+      cycle.dureeCycleJours = cycleDuration || cycle.dureeCycleJours;
+      cycle.dureeReglesJours = periodDuration;
+      cycle.statut = dto.estCycleActuel ? StatutCycleEnum.EN_COURS : StatutCycleEnum.TERMINE;
+      await this.cycleRepo.save(cycle);
+    } else {
+      cycle = this.cycleRepo.create({
+        utilisateurId: userId,
+        dateDebut: dto.dateDebut,
+        dateFin: dto.estCycleActuel ? null : endDateStr,
+        dureeCycleJours: dto.estCycleActuel ? null : cycleDuration,
+        dureeReglesJours: periodDuration,
+        statut: dto.estCycleActuel ? StatutCycleEnum.EN_COURS : StatutCycleEnum.TERMINE,
+        sourceSaisie: SourceSaisieEnum.MANUELLE,
+      });
+      cycle = await this.cycleRepo.save(cycle);
+    }
+
+    // Générer les jours de règles associés pour le cycle
+    const flowIntensity = dto.intensiteFlux || IntensiteFluxEnum.MOYEN;
+    for (let day = 0; day < periodDuration; day++) {
+      const flowDate = new Date(startDate);
+      flowDate.setDate(flowDate.getDate() + day);
+      const dateStr = flowDate.toISOString().split('T')[0];
+
+      const existingDay = await this.jourReglesRepo.findOne({
+        where: { cycleId: cycle.id, date: dateStr },
+      });
+      if (!existingDay) {
+        const jour = this.jourReglesRepo.create({
+          cycleId: cycle.id,
+          date: dateStr,
+          intensiteFlux: flowIntensity,
+          douleurNiveau: dto.douleurNiveau ?? 0,
+          notes: day === 0 ? dto.notes : undefined,
+        });
+        await this.jourReglesRepo.save(jour);
+      }
+    }
+
+    if (this.fertilityService) {
+      await this.fertilityService
+        .calculateAndSavePrediction(userId, dto.dateDebut)
+        .catch(() => {});
+    }
+
+    return this.getCycleById(userId, cycle.id);
+  }
+
+  /**
+   * Saisir plusieurs cycles passés en lot (historique préalable)
+   */
+  async createMultiplePastCycles(
+    userId: string,
+    dto: CreateMultiplePastCyclesDto,
+  ): Promise<Cycle[]> {
+    if (!dto.cycles || dto.cycles.length === 0) {
+      throw new BadRequestException('La liste des cycles passés est vide.');
+    }
+
+    // Trier les cycles du plus ancien au plus récent
+    const sorted = [...dto.cycles].sort(
+      (a, b) => new Date(a.dateDebut).getTime() - new Date(b.dateDebut).getTime(),
+    );
+
+    const createdCycles: Cycle[] = [];
+    for (const cycleDto of sorted) {
+      const created = await this.createPastCycle(userId, cycleDto);
+      createdCycles.push(created);
+    }
+
+    // Déclencher le recalcul final sur la date la plus récente
+    if (this.fertilityService && createdCycles.length > 0) {
+      const latest = createdCycles[createdCycles.length - 1];
+      await this.fertilityService
+        .calculateAndSavePrediction(userId, latest.dateDebut)
+        .catch(() => {});
+    }
+
+    return this.getCycles(userId);
   }
 
   /**

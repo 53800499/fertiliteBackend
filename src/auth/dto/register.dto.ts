@@ -31,6 +31,14 @@ export class RegisterDto {
   @IsEmail({}, { message: 'Adresse email invalide' })
   email: string;
 
+  @IsOptional()
+  @IsString()
+  nom?: string;
+
+  @IsOptional()
+  @IsString()
+  prenom?: string;
+
   @IsString()
   @MinLength(8, { message: 'Le mot de passe doit contenir au moins 8 caractères' })
   password: string;

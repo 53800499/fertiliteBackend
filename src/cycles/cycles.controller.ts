@@ -14,6 +14,7 @@ import { CyclesService } from './cycles.service';
 import { StartCycleDto } from './dto/start-cycle.dto';
 import { LogFlowDto } from './dto/log-flow.dto';
 import { UpdateCycleDto } from './dto/update-cycle.dto';
+import { CreatePastCycleDto, CreateMultiplePastCyclesDto } from './dto/create-past-cycle.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PremiumGuard } from '../subscriptions/guards/premium.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -31,6 +32,27 @@ export class CyclesController {
   @HttpCode(HttpStatus.CREATED)
   async startCycle(@CurrentUser() user: UserPayload, @Body() dto: StartCycleDto) {
     return this.cyclesService.startCycle(user.userId, dto);
+  }
+
+  /**
+   * Saisir un cycle passé ou historique
+   */
+  @Post('past')
+  @HttpCode(HttpStatus.CREATED)
+  async createPastCycle(@CurrentUser() user: UserPayload, @Body() dto: CreatePastCycleDto) {
+    return this.cyclesService.createPastCycle(user.userId, dto);
+  }
+
+  /**
+   * Saisir plusieurs cycles passés en lot (historique préalable)
+   */
+  @Post('past/batch')
+  @HttpCode(HttpStatus.CREATED)
+  async createMultiplePastCycles(
+    @CurrentUser() user: UserPayload,
+    @Body() dto: CreateMultiplePastCyclesDto,
+  ) {
+    return this.cyclesService.createMultiplePastCycles(user.userId, dto);
   }
 
   /**

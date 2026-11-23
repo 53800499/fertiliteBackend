@@ -5,6 +5,7 @@ import {
   BadRequestException,
   UnauthorizedException,
   NotFoundException,
+  Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -20,10 +21,13 @@ import { SessionAuthentification, PlateformeEnum } from './entities/session-auth
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
+import { ResetPasswordDto } from './dto/password-reset.dto';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     @InjectRepository(Utilisateur)
     private readonly utilisateurRepo: Repository<Utilisateur>,
@@ -46,7 +50,8 @@ export class AuthService {
    */
   async register(dto: RegisterDto, clientIp?: string) {
     // 1. Vérification unicité email
-    const existing = await this.utilisateurRepo.findOne({ where: { email: dto.email } });
+    const normalizedEmail = dto.email.toLowerCase().trim();
+    const existing = await this.utilisateurRepo.findOne({ where: { email: normalizedEmail } });
     if (existing) {
       throw new ConflictException('Cette adresse email est déjà associée à un compte.');
     }
@@ -94,7 +99,7 @@ export class AuthService {
 
     // 5. Création de l'utilisatrice
     const user = this.utilisateurRepo.create({
-      email: dto.email.toLowerCase(),
+      email: normalizedEmail,
       motDePasseHash,
       dateNaissance: dto.birthDate,
       languePreferee: dto.preferredLanguage || 'fr',
@@ -104,8 +109,10 @@ export class AuthService {
     const savedUser = await this.utilisateurRepo.save(user);
 
     // 6. Création du profil initial par défaut
+    const userDisplayName = dto.prenom?.trim() || dto.nom?.trim() || null;
     const profil = this.profilRepo.create({
       utilisateurId: savedUser.id,
+      prenom: userDisplayName,
       objectifPrincipal: ObjectifEnum.SUIVI_CYCLE,
       dureeCycleHabituelleJours: 28,
       dureeReglesHabituelleJours: 5,
@@ -151,7 +158,7 @@ export class AuthService {
 
     // 9. Émission des tokens et création de session
     const tokens = await this.generateTokens(savedUser.id, savedUser.email);
-    await this.createSession(savedUser.id, tokens.refreshToken, 'Premier appareil', PlateformeEnum.WEB, clientIp);
+    await this.createOrUpdateSession(savedUser.id, tokens.refreshToken, 'Premier appareil', PlateformeEnum.WEB, clientIp);
 
     return {
       user: {
@@ -169,7 +176,7 @@ export class AuthService {
    */
   async login(dto: LoginDto, clientIp?: string) {
     const user = await this.utilisateurRepo.findOne({
-      where: { email: dto.email.toLowerCase() },
+      where: { email: dto.email.toLowerCase().trim() },
     });
 
     if (!user || user.statutCompte === StatutCompteEnum.SUPPRIME) {
@@ -189,9 +196,9 @@ export class AuthService {
     user.dateDerniereConnexion = new Date();
     await this.utilisateurRepo.save(user);
 
-    // Génération de tokens et nouvelle session
+    // Génération de tokens et mise à jour de la session sans dupliquer l'appareil
     const tokens = await this.generateTokens(user.id, user.email);
-    await this.createSession(
+    await this.createOrUpdateSession(
       user.id,
       tokens.refreshToken,
       dto.deviceName || 'Appareil mobile',
@@ -217,11 +224,11 @@ export class AuthService {
     const hashed = this.hashToken(dto.refreshToken);
 
     const session = await this.sessionRepo.findOne({
-      where: { jetonRafraichissementHash: hashed, revoque: false },
+      where: { jetonRafraichissementHash: hashed },
       relations: { utilisateur: true },
     });
 
-    if (!session || new Date() > session.dateExpiration) {
+    if (!session || (session.dateExpiration && new Date() > session.dateExpiration)) {
       throw new UnauthorizedException('Session expirée ou invalide. Veuillez vous reconnecter.');
     }
 
@@ -229,6 +236,8 @@ export class AuthService {
     if (!user || user.statutCompte !== StatutCompteEnum.ACTIF) {
       throw new UnauthorizedException('Utilisatrice inactive');
     }
+
+    session.revoque = false;
 
     // Rotation du Refresh Token
     const tokens = await this.generateTokens(user.id, user.email);
@@ -245,33 +254,104 @@ export class AuthService {
   /**
    * Déconnexion (révocation de la session courante)
    */
-  async logout(userId: string, currentRefreshToken?: string) {
-    if (currentRefreshToken) {
-      const hashed = this.hashToken(currentRefreshToken);
-      await this.sessionRepo.update(
-        { utilisateurId: userId, jetonRafraichissementHash: hashed },
-        { revoque: true },
-      );
-    } else {
-      await this.sessionRepo.update(
-        { utilisateurId: userId, revoque: false },
-        { revoque: true },
-      );
-    }
+  async logout(userId?: string, currentRefreshToken?: string) {
+    try {
+      if (currentRefreshToken) {
+        const hashed = this.hashToken(currentRefreshToken);
+        await this.sessionRepo.update(
+          { jetonRafraichissementHash: hashed },
+          { revoque: true },
+        );
+      } else if (userId) {
+        await this.sessionRepo.update(
+          { utilisateurId: userId, revoque: false },
+          { revoque: true },
+        );
+      }
+    } catch (_) {}
     return { success: true, message: 'Déconnexion réussie' };
   }
 
   /**
-   * UC-03 : Mot de passe oublié (sécurisé, ne divulgue pas l'existence de l'email)
+   * UC-03 : Mot de passe oublié (sécurisé, génération d'un code de vérification à 6 chiffres)
    */
   async forgotPassword(email: string) {
-    const user = await this.utilisateurRepo.findOne({ where: { email: email.toLowerCase() } });
+    const normalizedEmail = email.toLowerCase().trim();
+    const user = await this.utilisateurRepo.findOne({ where: { email: normalizedEmail } });
+
     if (user && user.statutCompte === StatutCompteEnum.ACTIF) {
-      // Dans une implémentation complète, génération de jeton de reset et envoi par email
+      // Code à 6 chiffres (valable 15 minutes)
+      const code = Math.floor(100000 + Math.random() * 900000).toString();
+      const expiration = new Date(Date.now() + 15 * 60 * 1000);
+
+      user.codeReinitialisation = code;
+      user.expirationReinitialisation = expiration;
+      await this.utilisateurRepo.save(user);
+
+      this.logger.log(`[AUTH] Code de réinitialisation généré pour ${normalizedEmail}: ${code}`);
+
+      const isDev = this.configService.get<string>('NODE_ENV') !== 'production';
+      return {
+        success: true,
+        message: 'Un code de confirmation à 6 chiffres vous a été envoyé.',
+        code: isDev ? code : undefined,
+      };
     }
+
     return {
       success: true,
-      message: 'Si cette adresse email existe, un lien de réinitialisation vous a été envoyé.',
+      message: 'Si cette adresse email existe, un code de confirmation vous a été envoyé.',
+    };
+  }
+
+  /**
+   * UC-03b : Réinitialisation effective du mot de passe avec validation du code
+   */
+  async resetPassword(dto: ResetPasswordDto) {
+    const normalizedEmail = dto.email.toLowerCase().trim();
+    const code = (dto.code || dto.resetToken)?.trim();
+
+    if (!code) {
+      throw new BadRequestException('Le code de vérification est obligatoire.');
+    }
+
+    const user = await this.utilisateurRepo.findOne({ where: { email: normalizedEmail } });
+    if (!user) {
+      throw new BadRequestException('Demande de réinitialisation invalide ou code expiré.');
+    }
+
+    if (!user.codeReinitialisation || user.codeReinitialisation !== code) {
+      throw new BadRequestException('Code de confirmation invalide. Veuillez vérifier le code saisi.');
+    }
+
+    if (!user.expirationReinitialisation || new Date() > user.expirationReinitialisation) {
+      throw new BadRequestException('Le code de confirmation a expiré. Veuillez en demander un nouveau.');
+    }
+
+    // Hachage du nouveau mot de passe avec Argon2id
+    const nouveauHash = await argon2.hash(dto.newPassword, {
+      type: argon2.argon2id,
+      memoryCost: 65536,
+      timeCost: 3,
+      parallelism: 4,
+    });
+
+    user.motDePasseHash = nouveauHash;
+    user.codeReinitialisation = null;
+    user.expirationReinitialisation = null;
+    await this.utilisateurRepo.save(user);
+
+    // Révocation de toutes les sessions actives pour sécuriser le compte
+    await this.sessionRepo.update(
+      { utilisateurId: user.id, revoque: false },
+      { revoque: true },
+    );
+
+    this.logger.log(`[AUTH] Mot de passe réinitialisé avec succès pour l'utilisatrice ${normalizedEmail}`);
+
+    return {
+      success: true,
+      message: 'Votre mot de passe a été réinitialisé avec succès. Vous pouvez maintenant vous connecter.',
     };
   }
 
@@ -282,7 +362,7 @@ export class AuthService {
     const payload = { sub: userId, email };
 
     const accessToken = await this.jwtService.signAsync(payload, {
-      expiresIn: '15m',
+      expiresIn: '30d',
     });
 
     const refreshToken = crypto.randomBytes(40).toString('hex');
@@ -290,27 +370,76 @@ export class AuthService {
     return {
       accessToken,
       refreshToken,
-      expiresIn: 900, // 15 min en secondes
+      expiresIn: 30 * 24 * 3600, // 30 jours en secondes
     };
   }
 
-  private async createSession(
+  private async createOrUpdateSession(
     userId: string,
     rawRefreshToken: string,
     nomAppareil: string,
     plateforme: PlateformeEnum,
     ip?: string,
   ) {
-    const session = this.sessionRepo.create({
+    const hashedToken = this.hashToken(rawRefreshToken);
+    const expiration = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 jours
+    const normalizedDeviceName = (nomAppareil || 'Appareil mobile').trim();
+
+    // 1. Rechercher si une session existe déjà pour cet appareil (même utilisatrice, même nom d'appareil et plateforme)
+    const existingSession = await this.sessionRepo.findOne({
+      where: {
+        utilisateurId: userId,
+        nomAppareil: normalizedDeviceName,
+        plateforme: plateforme,
+      },
+      order: { dateDerniereUtilisation: 'DESC' },
+    });
+
+    if (existingSession) {
+      // Éviter de dupliquer l'appareil : on réutilise la même ligne en BDD
+      // datePremiereConnexion est préservée pour connaître le début de la période
+      existingSession.jetonRafraichissementHash = hashedToken;
+      existingSession.dateExpiration = expiration;
+      existingSession.dateDerniereUtilisation = new Date();
+      existingSession.revoque = false;
+      if (ip) existingSession.adresseIp = ip;
+
+      // Nettoyer d'éventuels doublons orphelins résiduels
+      await this.sessionRepo
+        .createQueryBuilder()
+        .update(SessionAuthentification)
+        .set({ revoque: true })
+        .where('utilisateur_id = :userId', { userId })
+        .andWhere('nom_appareil = :nomAppareil', { nomAppareil: normalizedDeviceName })
+        .andWhere('plateforme = :plateforme', { plateforme })
+        .andWhere('id != :keepId', { keepId: existingSession.id })
+        .execute()
+        .catch(() => {});
+
+      return this.sessionRepo.save(existingSession);
+    }
+
+    // 2. Si c'est un nouvel appareil, on l'insère une seule fois
+    const newSession = this.sessionRepo.create({
       utilisateurId: userId,
-      jetonRafraichissementHash: this.hashToken(rawRefreshToken),
-      nomAppareil,
+      jetonRafraichissementHash: hashedToken,
+      nomAppareil: normalizedDeviceName,
       plateforme,
       adresseIp: ip,
-      dateExpiration: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 jours
+      datePremiereConnexion: new Date(),
+      dateDerniereUtilisation: new Date(),
+      dateExpiration: expiration,
       revoque: false,
     });
-    return this.sessionRepo.save(session);
+    return this.sessionRepo.save(newSession);
+  }
+
+  decodeToken(token: string): { sub?: string; email?: string } | null {
+    try {
+      return this.jwtService.decode(token) as { sub?: string; email?: string } | null;
+    } catch (_) {
+      return null;
+    }
   }
 
   private hashToken(token: string): string {
